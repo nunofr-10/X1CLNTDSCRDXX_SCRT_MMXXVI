@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard · Configuración de Tickets</title>
+<title>Dashboard · Configuración de Moderación</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
@@ -52,17 +52,6 @@
   }
   .switch:checked { background: #23a55a; }
   .switch:checked::before { transform: translateX(18px); }
-
-  select[multiple] option:checked {
-    background: linear-gradient(0deg, #5865f2, #5865f2);
-    color: #fff;
-  }
-
-  .var-chip {
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-  }
-  .var-chip:hover { border-color: #5865f2; background: rgba(88,101,242,0.1); }
 
   /* --- Selector de roles estilo BotGhost (multi-instancia) --- */
   .role-picker-instance { position: relative; }
@@ -324,82 +313,6 @@
 
 {% include "_simulation_banner.html" %}
 
-{% macro embed_fields(prefix, embed) %}
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-    <div>
-      <label class="block text-xs font-bold uppercase text-muted mb-2">Author</label>
-      <input type="text" name="{{ prefix }}_author" data-var-target value="{{ embed.author }}"
-             placeholder="{server}'s Support Team"
-             class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-    </div>
-    <div>
-      <label class="block text-xs font-bold uppercase text-muted mb-2">Title</label>
-      <input type="text" name="{{ prefix }}_title" data-var-target value="{{ embed.title }}"
-             placeholder="Soporte al usuario"
-             class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-    </div>
-  </div>
-
-  <div>
-    <label class="block text-xs font-bold uppercase text-muted mb-2">Description</label>
-    <textarea name="{{ prefix }}_description" data-var-target rows="4"
-              placeholder="Hola {user.mention}, pulsa el botón de abajo para abrir un ticket."
-              class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm resize-y focus:outline-none focus:border-accent">{{ embed.description }}</textarea>
-  </div>
-
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-    <div>
-      <label class="block text-xs font-bold uppercase text-muted mb-2">Image URL</label>
-      <input type="text" name="{{ prefix }}_image_url" data-var-target value="{{ embed.image_url }}"
-             placeholder="https://…"
-             class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-    </div>
-    <div>
-      <label class="block text-xs font-bold uppercase text-muted mb-2">Thumbnail URL</label>
-      <input type="text" name="{{ prefix }}_thumbnail_url" data-var-target value="{{ embed.thumbnail_url }}"
-             placeholder="https://…"
-             class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-    </div>
-  </div>
-
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
-    <div>
-      <label class="block text-xs font-bold uppercase text-muted mb-2">Footer</label>
-      <input type="text" name="{{ prefix }}_footer" data-var-target value="{{ embed.footer }}"
-             placeholder="{server}'s Moderation Team"
-             class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-    </div>
-    <div>
-      <label class="block text-xs font-bold uppercase text-muted mb-2">Color</label>
-      <div class="flex items-center gap-3">
-        <input type="color" class="color-picker w-11 h-11 rounded-lg border border-border bg-panel cursor-pointer"
-               data-hex="{{ prefix }}_color_hex" value="{{ embed.color }}">
-        <input type="text" name="{{ prefix }}_color" id="{{ prefix }}_color_hex" value="{{ embed.color }}"
-               class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:border-accent">
-      </div>
-    </div>
-  </div>
-{% endmacro %}
-
-{% macro vars_panel(panel_id) %}
-  <div class="border border-border rounded-lg">
-    <button type="button" class="vars-toggle-btn w-full flex items-center justify-between px-4 py-3 text-xs font-bold uppercase text-muted hover:text-slate-100"
-            data-panel="{{ panel_id }}">
-      <span>🧩 Variables disponibles</span>
-      <span class="caret">▾</span>
-    </button>
-    <div id="{{ panel_id }}" class="hidden px-4 pb-4 flex flex-wrap gap-2">
-      {% for v in variables %}
-        <span class="var-chip text-xs font-mono bg-panel border border-border rounded-full px-3 py-1.5"
-              data-token="{{ v.token }}" title="{{ v.label }}">
-          {{ v.token }} <span class="text-muted">· {{ v.label }}</span>
-        </span>
-      {% endfor %}
-    </div>
-    <p class="px-4 pb-3 text-xs text-muted">Haz clic en una variable para insertarla en el campo seleccionado.</p>
-  </div>
-{% endmacro %}
-
 {% macro role_picker(field_name, selected_roles) %}
   <div class="role-picker-instance" data-selected='{{ selected_roles | tojson }}'>
     <input type="hidden" name="{{ field_name }}" class="role-picker-hidden" value="{{ selected_roles|join(',') }}">
@@ -437,7 +350,7 @@
     <div class="flex items-center gap-3 text-sm">
       <a href="{{ url_for('index') }}" class="text-muted hover:text-slate-100">← Módulos</a>
       <span class="text-border">|</span>
-      <h1 class="text-xl font-bold text-white">Tickets</h1>
+      <h1 class="text-xl font-bold text-white">Moderación</h1>
     </div>
     <div class="flex items-center gap-6 text-sm text-muted">
       <span>ES ES</span>
@@ -459,267 +372,101 @@
       {% endif %}
     {% endwith %}
 
-    {% if not config.modules.tickets %}
+    {% if not config.modules.moderation %}
       <div class="rounded-lg px-4 py-3 text-sm border bg-amber-500/10 border-amber-500 text-amber-400 flex items-center justify-between gap-4 flex-wrap">
-        <span>⚠️ El módulo de Tickets está <strong>desactivado</strong>. El panel no funcionará en Discord hasta que lo actives.</span>
+        <span>⚠️ El módulo de Moderación está <strong>desactivado</strong>. Los comandos no funcionarán en Discord hasta que lo actives.</span>
         <a href="{{ url_for('index') }}" class="text-xs font-semibold underline whitespace-nowrap">Activar en Módulos</a>
       </div>
     {% endif %}
 
-    <!-- a) Paneles de soporte -->
-    <section id="panel" class="bg-card border border-border rounded-xl p-6">
-      <h2 class="text-lg font-bold text-white mb-1">Paneles de soporte</h2>
-      <p class="text-sm text-muted mb-5">Configura el mensaje que se publicará en Discord para que los usuarios abran tickets.</p>
+    <!-- Ajustes generales -->
+    <section id="general" class="bg-card border border-border rounded-xl p-6">
+      <h2 class="text-lg font-bold text-white mb-1">Ajustes de moderación</h2>
+      <p class="text-sm text-muted mb-5">
+        Roles de staff generales y canal de logs. Se usan como respaldo cuando un comando
+        no tiene roles específicos propios (ver "Comandos y permisos" más abajo).
+      </p>
 
-      <form action="{{ url_for('save_panel') }}" method="POST" class="space-y-5" data-autosave>
+      <form action="{{ url_for('save_moderation') }}" method="POST" class="space-y-6" data-autosave>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-          <div>
-            <label class="block text-xs font-bold uppercase text-muted mb-2">Tipo de mensaje</label>
-            <select name="tipo_mensaje" class="tipo-mensaje-select w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent"
-                    data-embed="embed-builder-panel" data-text="text-builder-panel" required>
-              {% for value, label in message_types.items() %}
-                <option value="{{ value }}" {% if config.tipo_mensaje == value %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de Tickets</label>
-            <select name="canal_id" required
-                    class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-              <option value="" disabled {% if not config.canal_id %}selected{% endif %}>Selecciona un canal…</option>
-              {% for c in channels %}
-                <option value="{{ c.id }}" {% if config.canal_id == c.id %}selected{% endif %}>#{{ c.name }}</option>
-              {% endfor %}
-            </select>
-            {% if not channels %}
-              <p class="text-xs text-err mt-2">No se encontraron canales. Verifica que el bot esté en el servidor.</p>
-            {% endif %}
-            <p class="text-xs text-muted mt-2">Canal donde se publicará el panel con el botón "Abrir Ticket".</p>
-          </div>
-        </div>
-
+        <!-- Roles de Staff / Moderación -->
         <div>
-          <label class="block text-xs font-bold uppercase text-muted mb-2">Categoría de Tickets</label>
-          <select name="categoria_id"
-                  class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-            <option value="" {% if not config.categoria_id %}selected{% endif %}>Sin categoría (opcional)</option>
-            {% for cat in categories %}
-              <option value="{{ cat.id }}" {% if config.categoria_id == cat.id %}selected{% endif %}>{{ cat.name }}</option>
-            {% endfor %}
-          </select>
-          {% if not categories %}
-            <p class="text-xs text-err mt-2">No se encontraron categorías en este servidor.</p>
+          <label class="block text-xs font-bold uppercase text-muted mb-2">Roles de Staff / Moderación</label>
+          <p class="text-xs text-muted mb-3">
+            Estos roles (además de Administrador y Gestionar Mensajes) podrán usar cualquier
+            comando de moderación que no tenga roles específicos propios asignados.
+          </p>
+
+          {{ role_picker("staff_roles", config.staff_roles) }}
+
+          {% if not roles %}
+            <p class="text-xs text-err mt-2">No se encontraron roles. Verifica que el bot esté en el servidor.</p>
           {% endif %}
-          <p class="text-xs text-muted mt-2">Categoría donde se crearán los canales privados de cada ticket.</p>
         </div>
 
-        {{ vars_panel("vars-panel-panel") }}
-
-        <!-- Modo texto normal -->
-        <div id="text-builder-panel" class="{% if config.tipo_mensaje != 'text' %}hidden{% endif %}">
-          <label class="block text-xs font-bold uppercase text-muted mb-2">Mensaje del panel</label>
-          <textarea name="mensaje" rows="4" data-var-target
-                    placeholder="Ej: {user}, pulsa el botón de abajo para abrir un ticket de soporte."
-                    class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm resize-y focus:outline-none focus:border-accent">{{ config.mensaje }}</textarea>
-        </div>
-
-        <!-- Modo embed con diseño -->
-        <div id="embed-builder-panel" class="{% if config.tipo_mensaje != 'embed' %}hidden{% endif %} space-y-4">
-          <div class="flex items-center justify-between border-l-2 border-accent pl-3">
-            <p class="text-sm font-bold text-white">Message · Embed</p>
-          </div>
-          {{ embed_fields("embed", config.embed) }}
-        </div>
-      </form>
-
-      <div class="mt-4 pt-4 border-t border-border">
-        <form action="{{ url_for('enviar_panel') }}" method="POST">
-          <button type="submit"
-                  class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-ok hover:bg-green-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5 transition-colors">
-            🎫 Enviar Panel de Tickets al Servidor
-          </button>
-          <p class="text-xs text-muted mt-2">Publica el panel guardado (con el botón "Abrir Ticket") en el canal seleccionado arriba.</p>
-        </form>
-      </div>
-    </section>
-
-    <!-- a.2) Mensaje de apertura de ticket -->
-    <section id="bienvenida" class="bg-card border border-border rounded-xl p-6">
-      <h2 class="text-lg font-bold text-white mb-1">Mensaje de apertura de ticket</h2>
-      <p class="text-sm text-muted mb-5">Mensaje que se envía dentro del canal privado en cuanto se crea el ticket.</p>
-
-      <form action="{{ url_for('save_bienvenida') }}" method="POST" class="space-y-5" data-autosave>
-
-        <div class="sm:w-1/2">
-          <label class="block text-xs font-bold uppercase text-muted mb-2">Tipo de mensaje</label>
-          <select name="tipo_mensaje_bienvenida" class="tipo-mensaje-select w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent"
-                  data-embed="embed-builder-bienvenida" data-text="text-builder-bienvenida" required>
-            {% for value, label in message_types.items() %}
-              <option value="{{ value }}" {% if config.mensaje_bienvenida.tipo_mensaje == value %}selected{% endif %}>{{ label }}</option>
+        <!-- Canal de Logs -->
+        <div>
+          <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de Logs</label>
+          <select name="mod_log_channel_id"
+                  class="w-full sm:w-1/2 bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+            <option value="" {% if not config.mod_log_channel_id %}selected{% endif %}>Sin canal de logs (desactivado)</option>
+            {% for c in channels %}
+              <option value="{{ c.id }}" {% if config.mod_log_channel_id == c.id %}selected{% endif %}>#{{ c.name }}</option>
             {% endfor %}
           </select>
-        </div>
-
-        {{ vars_panel("vars-panel-bienvenida") }}
-
-        <!-- Modo texto normal -->
-        <div id="text-builder-bienvenida" class="{% if config.mensaje_bienvenida.tipo_mensaje != 'text' %}hidden{% endif %}">
-          <label class="block text-xs font-bold uppercase text-muted mb-2">Mensaje de apertura</label>
-          <textarea name="bienvenida_mensaje" rows="4" data-var-target
-                    placeholder="Ej: Hola {user.mention}, gracias por abrir un ticket. El equipo de soporte te atenderá en breve."
-                    class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm resize-y focus:outline-none focus:border-accent">{{ config.mensaje_bienvenida.mensaje }}</textarea>
-        </div>
-
-        <!-- Modo embed con diseño -->
-        <div id="embed-builder-bienvenida" class="{% if config.mensaje_bienvenida.tipo_mensaje != 'embed' %}hidden{% endif %} space-y-4">
-          <div class="flex items-center justify-between border-l-2 border-accent pl-3">
-            <p class="text-sm font-bold text-white">Message · Embed</p>
-          </div>
-          {{ embed_fields("bienvenida_embed", config.mensaje_bienvenida.embed) }}
+          {% if not channels %}
+            <p class="text-xs text-err mt-2">No se encontraron canales. Verifica que el bot esté en el servidor.</p>
+          {% endif %}
+          <p class="text-xs text-muted mt-2">
+            Aquí se enviará un embed con cada sanción aplicada (warn, mute, kick, ban, clear…).
+          </p>
         </div>
       </form>
     </section>
 
-    <!-- b) Roles de staff (whitelist) -->
-    <section id="staff" class="bg-card border border-border rounded-xl p-6">
-      <h2 class="text-lg font-bold text-white mb-1">Roles de staff (whitelist)</h2>
-      <p class="text-sm text-muted mb-5">Roles con permiso para reclamar y cerrar tickets (soporte, mods, admins).</p>
+    <!-- Comandos y permisos individuales -->
+    <section id="comandos" class="bg-card border border-border rounded-xl p-6">
+      <h2 class="text-lg font-bold text-white mb-1">Comandos y permisos</h2>
+      <p class="text-sm text-muted mb-5">
+        Activa o desactiva cada comando de forma individual y define qué roles pueden usarlo.
+        Un comando desactivado no aparecerá al escribir "/" en Discord. Si no asignas roles
+        específicos a un comando, se usarán los Roles de Staff generales de arriba.
+      </p>
 
-      <form action="{{ url_for('save_staff') }}" method="POST" class="space-y-4" data-autosave>
-        {{ role_picker("staff_roles", config.staff_roles) }}
-
-        {% if not roles %}
-          <p class="text-xs text-err">No se encontraron roles. Verifica que el bot esté en el servidor.</p>
-        {% endif %}
-      </form>
-    </section>
-
-    <script id="serverRolesData" type="application/json">{{ roles_json | tojson }}</script>
-
-    <!-- c) Funciones y comandos opcionales -->
-    <section id="features" class="bg-card border border-border rounded-xl p-6">
-      <h2 class="text-lg font-bold text-white mb-1">Funciones y comandos opcionales</h2>
-      <p class="text-sm text-muted mb-5">Activa o desactiva funciones específicas del sistema de tickets.</p>
-
-      <form action="{{ url_for('save_features') }}" method="POST" class="space-y-4" data-autosave>
-        <label class="flex items-center justify-between border border-border rounded-lg px-4 py-3 cursor-pointer">
-          <div>
-            <p class="text-sm font-semibold text-white">Habilitar /close</p>
-            <p class="text-xs text-muted">Permite cerrar el ticket con el comando /close.</p>
-          </div>
-          <input type="checkbox" name="close" class="switch" {% if config.features.close %}checked{% endif %}>
-        </label>
-
-        <label class="flex items-center justify-between border border-border rounded-lg px-4 py-3 cursor-pointer">
-          <div>
-            <p class="text-sm font-semibold text-white">Habilitar /claim</p>
-            <p class="text-xs text-muted">Permite al staff reclamar el ticket con /claim.</p>
-          </div>
-          <input type="checkbox" name="claim" class="switch" {% if config.features.claim %}checked{% endif %}>
-        </label>
-
-        <div class="border border-border rounded-lg">
-          <label class="flex items-center justify-between px-4 py-3 cursor-pointer">
-            <div>
-              <p class="text-sm font-semibold text-white">Generación de transcripts</p>
-              <p class="text-xs text-muted">Genera un transcript del ticket al cerrarlo.</p>
+      <form action="{{ url_for('save_moderation_commands') }}" method="POST" class="space-y-4" data-autosave>
+        {% for cmd in moderation_commands %}
+          {% set cmd_cfg = config.commands.get(cmd.key, {"enabled": True, "roles": []}) %}
+          <div class="border border-border rounded-lg p-4 space-y-3">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm font-semibold text-white font-mono">{{ cmd.label }}</p>
+                <p class="text-xs text-muted">{{ cmd.description }}</p>
+              </div>
+              <input type="checkbox" name="cmd_{{ cmd.key }}_enabled" class="switch"
+                     {% if cmd_cfg.enabled %}checked{% endif %}>
             </div>
-            <input type="checkbox" name="transcript" id="transcript-toggle" class="switch"
-                   data-reveal="transcript-channel-field" {% if config.features.transcript %}checked{% endif %}>
-          </label>
 
-          <div id="transcript-channel-field" class="px-4 pb-4 {% if not config.features.transcript %}hidden{% endif %}">
-            <label class="block text-xs font-bold uppercase text-muted mb-2">Canal para enviar transcripts</label>
-            <select name="transcript_channel_id"
-                    class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
-              <option value="" disabled {% if not config.features.transcript_channel_id %}selected{% endif %}>Selecciona un canal…</option>
-              {% for c in channels %}
-                <option value="{{ c.id }}" {% if config.features.transcript_channel_id == c.id %}selected{% endif %}>#{{ c.name }}</option>
-              {% endfor %}
-            </select>
-            {% if not channels %}
-              <p class="text-xs text-err mt-2">No se encontraron canales. Verifica que el bot esté en el servidor.</p>
-            {% endif %}
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-muted mb-2">
+                Roles autorizados para {{ cmd.label }}
+              </label>
+              {{ role_picker("cmd_" ~ cmd.key ~ "_roles", cmd_cfg.roles) }}
+            </div>
           </div>
-        </div>
-
-        <label class="flex items-center justify-between border border-border rounded-lg px-4 py-3 cursor-pointer">
-          <div>
-            <p class="text-sm font-semibold text-white">Botones añadir/quitar usuarios</p>
-            <p class="text-xs text-muted">Permite añadir o quitar usuarios del ticket desde botones.</p>
-          </div>
-          <input type="checkbox" name="add_remove_users" class="switch" {% if config.features.add_remove_users %}checked{% endif %}>
-        </label>
+        {% endfor %}
       </form>
     </section>
 
   </main>
 
+  <script id="serverRolesData" type="application/json">{{ roles_json | tojson }}</script>
+
   <script>
-    // Alternar entre modo Embed y modo Texto normal (funciona para cualquier número de secciones)
-    document.querySelectorAll(".tipo-mensaje-select").forEach((select) => {
-      const embedEl = document.getElementById(select.dataset.embed);
-      const textEl = document.getElementById(select.dataset.text);
-      select.addEventListener("change", () => {
-        const isEmbed = select.value === "embed";
-        embedEl.classList.toggle("hidden", !isEmbed);
-        textEl.classList.toggle("hidden", isEmbed);
-      });
-    });
-
-    // Selector de color <-> input hex
-    document.querySelectorAll(".color-picker").forEach((picker) => {
-      const hex = document.getElementById(picker.dataset.hex);
-      picker.addEventListener("input", () => { hex.value = picker.value; });
-      hex.addEventListener("input", () => {
-        if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) picker.value = hex.value;
-      });
-    });
-
-    // Mostrar/ocultar el selector de canal cuando se activa un toggle (data-reveal)
-    document.querySelectorAll("[data-reveal]").forEach((toggle) => {
-      const target = document.getElementById(toggle.dataset.reveal);
-      toggle.addEventListener("change", () => {
-        target.classList.toggle("hidden", !toggle.checked);
-      });
-    });
-
-    // Paneles de variables: mostrar/ocultar
-    document.querySelectorAll(".vars-toggle-btn").forEach((btn) => {
-      const panelEl = document.getElementById(btn.dataset.panel);
-      const caret = btn.querySelector(".caret");
-      btn.addEventListener("click", () => {
-        panelEl.classList.toggle("hidden");
-        caret.textContent = panelEl.classList.contains("hidden") ? "▾" : "▴";
-      });
-    });
-
-    // Insertar variable en el último campo enfocado (con data-var-target)
-    let lastFocused = null;
-    document.querySelectorAll("[data-var-target]").forEach((el) => {
-      el.addEventListener("focus", () => { lastFocused = el; });
-    });
-
-    document.querySelectorAll(".var-chip").forEach((chip) => {
-      chip.addEventListener("click", () => {
-        if (!lastFocused) return;
-        const token = chip.dataset.token;
-        const start = lastFocused.selectionStart ?? lastFocused.value.length;
-        const end = lastFocused.selectionEnd ?? lastFocused.value.length;
-        const value = lastFocused.value;
-        lastFocused.value = value.slice(0, start) + token + value.slice(end);
-        lastFocused.focus();
-        const cursor = start + token.length;
-        lastFocused.setSelectionRange(cursor, cursor);
-      });
-    });
-
     // ------------------------------------------------------------------
     // Selector de roles estilo BotGhost — soporta múltiples instancias en
-    // la misma página. Los roles del servidor se cargan una sola vez y se
-    // comparten entre todas las instancias.
+    // la misma página (una general + una por cada comando de moderación).
+    // Los roles del servidor se cargan una sola vez y se comparten entre
+    // todas las instancias.
     // ------------------------------------------------------------------
     (function initRolePickers() {
       const instances = document.querySelectorAll(".role-picker-instance");
