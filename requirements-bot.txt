@@ -1,0 +1,8 @@
+# Dependencias del proceso del bot (main.py + cogs/).
+# Este archivo es independiente de requirements.txt, que es el usado por
+# el dashboard Flask desplegado en Vercel. El bot necesita correr en un
+# proceso siempre activo (VPS, Railway, Fly.io, etc.), no en funciones
+# serverless.
+discord.py==2.4.0
+motor==3.5.1
+python-dotenv==1.0.1
