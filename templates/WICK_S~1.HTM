@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard · Anti-Raid (BETA)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          base: "#07080c",
+          panel: "#171a23",
+          card: "#12141c",
+          border: "#252836",
+          accent: "#5865f2",
+          muted: "#8b8fa3",
+          ok: "#23a55a",
+          err: "#ed4245",
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: "Segoe UI", Roboto, -apple-system, sans-serif; }
+
+  .switch {
+    width: 42px; height: 24px; border-radius: 999px; background: #2a2f3d;
+    position: relative; flex-shrink: 0; appearance: none; cursor: pointer;
+    outline: none; transition: background 0.15s ease;
+  }
+  .switch::before {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; transition: transform 0.15s ease;
+  }
+  .switch:checked { background: #23a55a; }
+  .switch:checked::before { transform: translateX(18px); }
+
+  .switch-sm {
+    width: 34px; height: 20px; border-radius: 999px; background: #2a2f3d;
+    position: relative; flex-shrink: 0; appearance: none; cursor: pointer;
+    outline: none; transition: background 0.15s ease;
+  }
+  .switch-sm::before {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: transform 0.15s ease;
+  }
+  .switch-sm:checked { background: #23a55a; }
+  .switch-sm:checked::before { transform: translateX(14px); }
+
+  /* --- Stepper --- */
+  .stepper-nav {
+    display: flex; align-items: center; gap: 4px; overflow-x: auto;
+    background: #12141c; border: 1px solid #252836; border-radius: 14px; padding: 6px;
+  }
+  .step-tab-btn {
+    flex: 1; min-width: 130px; display: flex; align-items: center; justify-content: center;
+    gap: 8px; padding: 12px 14px; border-radius: 10px; font-size: 12.5px; font-weight: 700;
+    color: #8b8fa3; cursor: pointer; white-space: nowrap; transition: background 0.15s ease, color 0.15s ease;
+  }
+  .step-tab-btn .step-num {
+    width: 20px; height: 20px; border-radius: 50%; background: #2a2f3d; color: #cfd2dc;
+    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800;
+    flex-shrink: 0;
+  }
+  .step-tab-btn:hover { color: #e3e5e8; }
+  .step-tab-btn.active { background: #5865f2; color: #fff; }
+  .step-tab-btn.active .step-num { background: rgba(255,255,255,0.25); color: #fff; }
+  .step-panel { display: none; }
+  .step-panel.active { display: block; }
+
+  /* --- Sub-tabs de Whitelists --- */
+  .wl-tab-btn {
+    padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+    color: #8b8fa3; cursor: pointer; white-space: nowrap; border: 1px solid transparent;
+  }
+  .wl-tab-btn:hover { color: #e3e5e8; }
+  .wl-tab-btn.active { background: rgba(88,101,242,0.15); color: #a5b0ff; border-color: rgba(88,101,242,0.4); }
+  .wl-tab-panel { display: none; }
+  .wl-tab-panel.active { display: block; }
+
+  /* --- Previsualización de chat de Discord --- */
+  .discord-preview {
+    background: #313338; border-radius: 12px; padding: 14px; font-family: "gg sans", "Segoe UI", sans-serif;
+  }
+  .discord-msg { display: flex; gap: 12px; padding: 6px 4px; }
+  .discord-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; }
+  .discord-author { font-size: 13px; font-weight: 600; color: #f2f3f5; }
+  .discord-time { font-size: 11px; color: #949ba4; margin-left: 6px; font-weight: 400; }
+  .discord-text { font-size: 13.5px; color: #dbdee1; line-height: 1.4; }
+  .discord-bot-tag {
+    font-size: 9px; font-weight: 700; background: #5865f2; color: #fff;
+    border-radius: 3px; padding: 1px 4px; margin-left: 4px; vertical-align: middle;
+  }
+  .discord-embed {
+    border-left: 4px solid #ed4245; background: #2b2d31; border-radius: 4px;
+    padding: 8px 12px; margin-top: 6px; max-width: 420px;
+  }
+  .discord-embed.ok { border-left-color: #23a55a; }
+  .discord-embed-title { font-size: 13px; font-weight: 700; color: #fff; }
+  .discord-embed-desc { font-size: 12.5px; color: #dbdee1; margin-top: 2px; line-height: 1.4; }
+  .preview-item { transition: opacity 0.15s ease, max-height 0.15s ease; overflow: hidden; }
+  .preview-item.preview-hidden { display: none; }
+
+  /* --- Picker de entidades (roles/canales/categorías) --- */
+  .picker-instance {
+    background: #12141c;
+  }
+  .picker-instance::-webkit-scrollbar { width: 6px; }
+  .picker-instance::-webkit-scrollbar-thumb { background: #2a2f3d; border-radius: 999px; }
+
+  /* --- Barra flotante de cambios sin guardar --- */
+  #unsaved-bar {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120%);
+    opacity: 0; pointer-events: none; transition: transform 0.25s ease, opacity 0.25s ease;
+    z-index: 100; background: #1e2025; border: 1px solid #3a3d44; border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55); padding: 14px 18px; display: flex;
+    align-items: center; gap: 16px; max-width: 92vw; flex-wrap: wrap; justify-content: center;
+  }
+  #unsaved-bar.show { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
+  #unsaved-bar .unsaved-text { font-size: 13px; font-weight: 600; color: #f5c451; white-space: nowrap; }
+  #unsaved-bar .unsaved-actions { display: flex; gap: 8px; }
+  .btn-save-bar {
+    background: #23a55a; color: #fff; border: none; border-radius: 8px; padding: 8px 16px;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s ease;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-save-bar:hover { background: #1c8a4a; }
+  .btn-save-bar:disabled { opacity: 0.6; cursor: default; }
+  .btn-discard-bar {
+    background: transparent; color: #e3e5e8; border: 1px solid #3a3d44; border-radius: 8px;
+    padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-discard-bar:hover { background: #2b2d31; border-color: #ed4245; color: #ed4245; }
+
+  /* --- Modal de bloqueo de navegación --- */
+  #nav-guard-modal {
+    position: fixed; inset: 0; z-index: 200; background: rgba(5,6,10,0.72); display: flex;
+    align-items: center; justify-content: center; opacity: 0; pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  #nav-guard-modal.show { opacity: 1; pointer-events: auto; }
+  #nav-guard-modal .modal-box {
+    background: #171a23; border: 1px solid #252836; border-radius: 14px; padding: 24px;
+    width: 380px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    transform: translateY(10px); transition: transform 0.15s ease;
+  }
+  #nav-guard-modal.show .modal-box { transform: translateY(0); }
+  #nav-guard-modal h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  #nav-guard-modal p { font-size: 13px; color: #8b8fa3; margin-bottom: 20px; line-height: 1.5; }
+  #nav-guard-modal .modal-actions { display: flex; flex-direction: column; gap: 8px; }
+  .btn-modal-primary {
+    background: #5865f2; color: #fff; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-primary:hover { background: #4752c4; }
+  .btn-modal-danger {
+    background: transparent; color: #ed4245; border: 1px solid #3a3d44; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-danger:hover { background: rgba(237,66,69,0.1); border-color: #ed4245; }
+  .btn-modal-ghost {
+    background: transparent; color: #8b8fa3; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-ghost:hover { color: #e3e5e8; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35);
+    border-top-color: #fff; animation: spin 0.6s linear infinite; display: inline-block;
+  }
+</style>
+</head>
+<body class="bg-base text-slate-100 min-h-screen">
+
+{% include "_simulation_banner.html" %}
+
+{% macro toggle_row(name, title, description, checked, small=False) %}
+  <label class="flex items-center justify-between gap-4 border border-border rounded-lg px-4 py-3 cursor-pointer">
+    <div>
+      <p class="text-sm font-semibold text-white">{{ title }}</p>
+      {% if description %}<p class="text-xs text-muted mt-0.5">{{ description }}</p>{% endif %}
+    </div>
+    <input type="checkbox" name="{{ name }}" class="{{ 'switch-sm' if small else 'switch' }}" {% if checked %}checked{% endif %}>
+  </label>
+{% endmacro %}
+
+{% macro id_list_input(field_name, current_ids, placeholder) %}
+  <input type="text" name="{{ field_name }}" value="{{ current_ids|join(',') }}"
+         placeholder="{{ placeholder }}"
+         class="w-full bg-panel border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-accent">
+{% endmacro %}
+
+{% macro checkbox_picker(field_name, items, selected_ids, prefix) %}
+  <div class="picker-instance border border-border rounded-lg max-h-36 overflow-y-auto p-2 space-y-0.5">
+    <input type="hidden" name="{{ field_name }}" class="picker-hidden-input" value="{{ selected_ids|join(',') }}">
+    {% if not items %}
+      <p class="text-xs text-muted px-2 py-3">No hay elementos disponibles en este servidor.</p>
+    {% endif %}
+    {% for item in items %}
+      <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-panel cursor-pointer text-xs text-slate-200">
+        <input type="checkbox" class="picker-checkbox" value="{{ item.id }}" {% if item.id in selected_ids %}checked{% endif %}>
+        <span>{{ prefix }}{{ item.name }}</span>
+      </label>
+    {% endfor %}
+  </div>
+{% endmacro %}
+
+  <header class="flex items-center justify-between px-8 py-5 border-b border-border">
+    <div class="flex items-center gap-3 text-sm">
+      <a href="{{ url_for('index') }}" class="text-muted hover:text-slate-100">← Módulos</a>
+      <span class="text-border">|</span>
+      <h1 class="text-xl font-bold text-white">Anti-Raid <span class="text-[10px] font-bold uppercase bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full align-middle">BETA</span></h1>
+    </div>
+  </header>
+
+  <main class="px-6 py-8 max-w-6xl mx-auto space-y-6">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="rounded-lg px-4 py-3 text-sm border
+            {% if category == 'success' %} bg-ok/10 border-ok text-ok
+            {% else %} bg-err/10 border-err text-err {% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% if not config.modules.wick_security %}
+      <div class="rounded-lg px-4 py-3 text-sm border bg-amber-500/10 border-amber-500 text-amber-400 flex items-center justify-between gap-4 flex-wrap">
+        <span>⚠️ El sistema Anti-Raid está <strong>desactivado</strong> globalmente. Ningún submódulo (AutoMod, AntiNuke, JoinGate, Cuarentena) actuará hasta que lo actives.</span>
+        <a href="{{ url_for('index') }}" class="text-xs font-semibold underline whitespace-nowrap">Activar en Módulos</a>
+      </div>
+    {% endif %}
+
+    <!-- Stepper -->
+    <nav class="stepper-nav">
+      <div class="step-tab-btn active" data-step="inicio"><span class="step-num">1</span> Config Inicial</div>
+      <div class="step-tab-btn" data-step="misc"><span class="step-num">2</span> Misc</div>
+      <div class="step-tab-btn" data-step="automod"><span class="step-num">3</span> AutoMod</div>
+      <div class="step-tab-btn" data-step="antinuke"><span class="step-num">4</span> AntiNuke</div>
+      <div class="step-tab-btn" data-step="whitelists"><span class="step-num">5</span> Whitelists</div>
+      <div class="step-tab-btn" data-step="joingate"><span class="step-num">6</span> JoinGate</div>
+    </nav>
+
+    <!-- ===================== PASO 1: CONFIG INICIAL ===================== -->
+    <section class="step-panel active" id="step-inicio">
+      <div class="bg-card border border-border rounded-xl p-6 space-y-5">
+        <div>
+          <h2 class="text-lg font-bold text-white mb-1">👋 Bienvenido a Anti-Raid <span class="text-xs font-bold uppercase bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full align-middle">BETA</span></h2>
+          <p class="text-sm text-muted">
+            Un asistente por pasos, al estilo WickBot, para configurar toda la seguridad de tu servidor:
+            protección AutoMod, AntiNuke, Cuarentena y JoinGate. Usa la barra de arriba o los botones
+            "Siguiente" para moverte entre pasos. Los cambios se guardan con la barra flotante al final.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="border border-border rounded-lg p-4">
+            <p class="text-2xl mb-1">🧹</p>
+            <p class="text-sm font-bold text-white">AutoMod</p>
+            <p class="text-xs mt-1 {% if config.modules.automod %}text-ok{% else %}text-err{% endif %} font-semibold">
+              {{ "Activo" if config.modules.automod else "Desactivado" }}
+            </p>
+          </div>
+          <div class="border border-border rounded-lg p-4">
+            <p class="text-2xl mb-1">💣</p>
+            <p class="text-sm font-bold text-white">AntiNuke</p>
+            <p class="text-xs mt-1 {% if config.modules.antinuke %}text-ok{% else %}text-err{% endif %} font-semibold">
+              {{ "Activo" if config.modules.antinuke else "Desactivado" }}
+            </p>
+          </div>
+          <div class="border border-border rounded-lg p-4">
+            <p class="text-2xl mb-1">🚧</p>
+            <p class="text-sm font-bold text-white">Cuarentena</p>
+            <p class="text-xs mt-1 {% if config.modules.quarantine %}text-ok{% else %}text-err{% endif %} font-semibold">
+              {{ "Activo" if config.modules.quarantine else "Desactivado" }}
+            </p>
+          </div>
+          <div class="border border-border rounded-lg p-4">
+            <p class="text-2xl mb-1">🚪</p>
+            <p class="text-sm font-bold text-white">JoinGate</p>
+            <p class="text-xs mt-1 {% if config.modules.joingate %}text-ok{% else %}text-err{% endif %} font-semibold">
+              {{ "Activo" if config.modules.joingate else "Desactivado" }}
+            </p>
+          </div>
+        </div>
+
+        <button type="button" class="step-goto-btn bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5" data-goto="misc">
+          Empezar configuración →
+        </button>
+      </div>
+    </section>
+
+    <!-- ===================== PASO 2: MISC ===================== -->
+    <section class="step-panel" id="step-misc">
+      <form action="{{ url_for('save_wick_misc') }}" method="POST" class="bg-card border border-border rounded-xl p-6 space-y-5" data-autosave>
+        <h2 class="text-lg font-bold text-white mb-1">⚙️ Configuración General (Misc)</h2>
+        <p class="text-sm text-muted mb-2">Canales e información base que usan el resto de los módulos de seguridad.</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de Logs Generales</label>
+            <select name="log_channel_id" class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+              <option value="" {% if not config.misc.log_channel_id %}selected{% endif %}>Sin canal de logs</option>
+              {% for c in channels %}
+                <option value="{{ c.id }}" {% if config.misc.log_channel_id == c.id %}selected{% endif %}>#{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de Logs de Moderación</label>
+            <select name="mod_log_channel_id" class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+              <option value="" {% if not config.misc.mod_log_channel_id %}selected{% endif %}>Sin canal de logs</option>
+              {% for c in channels %}
+                <option value="{{ c.id }}" {% if config.misc.mod_log_channel_id == c.id %}selected{% endif %}>#{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold uppercase text-muted mb-2">Rol Principal / Verificado</label>
+          <select name="main_role_id" class="w-full sm:w-1/2 bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+            <option value="" {% if not config.misc.main_role_id %}selected{% endif %}>Sin rol principal</option>
+            {% for r in roles %}
+              <option value="{{ r.id }}" {% if config.misc.main_role_id == r.id %}selected{% endif %}>@{{ r.name }}</option>
+            {% endfor %}
+          </select>
+          <p class="text-xs text-muted mt-2">Se usa como referencia de "miembro verificado" en la protección de Cuarentena.</p>
+        </div>
+
+        <div class="flex justify-between pt-2">
+          <button type="button" class="step-goto-btn text-sm text-muted hover:text-slate-100" data-goto="inicio">← Anterior</button>
+          <button type="button" class="step-goto-btn bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5" data-goto="automod">Siguiente →</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ===================== PASO 3: AUTOMOD ===================== -->
+    <section class="step-panel" id="step-automod">
+      <form action="{{ url_for('save_wick_automod') }}" method="POST" data-autosave>
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+          <div class="lg:col-span-3 bg-card border border-border rounded-xl p-6 space-y-5">
+            <label class="flex items-center justify-between gap-4 cursor-pointer">
+              <div>
+                <h2 class="text-lg font-bold text-white">🧹 AutoMod</h2>
+                <p class="text-xs text-muted mt-0.5">Moderación automática de mensajes en todo el servidor.</p>
+              </div>
+              <input type="checkbox" name="automod_enabled" class="switch" {% if config.automod.enabled %}checked{% endif %}>
+            </label>
+
+            <div class="space-y-3">
+              {{ toggle_row("moderate_invites", "🔗 Invitaciones de Discord", "Elimina enlaces de invitación a otros servidores.", config.automod.moderate_invites) }}
+              <div data-preview-target="prev-invite">{{ toggle_row("filter_scam", "⚠️ Enlaces / links maliciosos", "Bloquea enlaces conocidos de scam, phishing o IP grabbers.", config.automod.filter_scam) }}</div>
+              {{ toggle_row("filter_nsfw", "🔞 Contenido NSFW", "Filtra imágenes/enlaces NSFW fuera de canales marcados como tal.", config.automod.filter_nsfw) }}
+              <div data-preview-target="prev-webhook">{{ toggle_row("monitor_webhooks", "🪝 Webhooks sin lista blanca", "Elimina mensajes de webhooks no autorizados.", config.automod.monitor_webhooks) }}</div>
+            </div>
+
+            <div class="border-t border-border pt-5 space-y-3">
+              <label class="flex items-center justify-between gap-4 cursor-pointer">
+                <p class="text-sm font-bold text-white">🌊 Anti-Spam</p>
+                <input type="checkbox" name="anti_spam_enabled" class="switch-sm" {% if config.automod.anti_spam.enabled %}checked{% endif %}>
+              </label>
+              <div data-preview-target="prev-repetitive">{{ toggle_row("repetitive_spam", "Mensajes repetidos", "Detecta el mismo mensaje enviado varias veces seguidas.", config.automod.anti_spam.repetitive_spam, small=True) }}</div>
+              <div data-preview-target="prev-mention">{{ toggle_row("mention_spam", "Exceso de menciones", "Demasiadas menciones @usuario en un solo mensaje.", config.automod.anti_spam.mention_spam, small=True) }}</div>
+              {{ toggle_row("attachment_spam", "Spam de adjuntos", "Muchos archivos/imágenes enviados en poco tiempo.", config.automod.anti_spam.attachment_spam, small=True) }}
+              {{ toggle_row("long_messages", "Mensajes muy largos", "Bloquea mensajes que superan un límite razonable de caracteres.", config.automod.anti_spam.long_messages, small=True) }}
+              {{ toggle_row("emoji_spam", "Spam de emojis", "Demasiados emojis en un mismo mensaje.", config.automod.anti_spam.emoji_spam, small=True) }}
+              {{ toggle_row("new_lines_spam", "Spam de saltos de línea", "Mensajes con saltos de línea excesivos (walls of text).", config.automod.anti_spam.new_lines_spam, small=True) }}
+              <div data-preview-target="prev-zalgo">{{ toggle_row("zalgo_spam", "Texto Zalgo", "Texto deformado con caracteres unicode combinables.", config.automod.anti_spam.zalgo_spam, small=True) }}</div>
+            </div>
+
+            <div class="flex justify-between pt-2">
+              <button type="button" class="step-goto-btn text-sm text-muted hover:text-slate-100" data-goto="misc">← Anterior</button>
+              <button type="button" class="step-goto-btn bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5" data-goto="antinuke">Siguiente →</button>
+            </div>
+          </div>
+
+          <!-- Previsualización de chat -->
+          <div class="lg:col-span-2">
+            <div class="sticky top-6 bg-card border border-border rounded-xl p-4">
+              <p class="text-xs font-bold uppercase text-muted mb-3">📺 Previsualización en vivo</p>
+              <div class="discord-preview space-y-1">
+                <div class="discord-msg">
+                  <img class="discord-avatar" src="https://cdn.discordapp.com/embed/avatars/1.png">
+                  <div>
+                    <p><span class="discord-author">usuario_random</span><span class="discord-time">Hoy a las 14:02</span></p>
+                    <p class="discord-text">discord.gg/servidor-random ¡únete gratis!</p>
+                  </div>
+                </div>
+                <div class="preview-item" id="prev-invite">
+                  <div class="discord-msg">
+                    <div class="w-9"></div>
+                    <div class="discord-embed">
+                      <p class="discord-embed-title">🔗 Invitación eliminada</p>
+                      <p class="discord-embed-desc">Se eliminó un mensaje de <b>usuario_random</b> por contener una invitación no autorizada.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="discord-msg pt-2">
+                  <img class="discord-avatar" src="https://cdn.discordapp.com/embed/avatars/2.png">
+                  <div>
+                    <p><span class="discord-author">otro_usuario</span><span class="discord-time">Hoy a las 14:05</span></p>
+                    <p class="discord-text">spamspamspamspamspamspamspam</p>
+                  </div>
+                </div>
+                <div class="preview-item" id="prev-repetitive">
+                  <div class="discord-msg">
+                    <div class="w-9"></div>
+                    <div class="discord-embed">
+                      <p class="discord-embed-title">🌊 Spam detectado</p>
+                      <p class="discord-embed-desc">Mensajes repetidos de <b>otro_usuario</b> eliminados y usuario silenciado.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="discord-msg pt-2">
+                  <img class="discord-avatar" src="https://cdn.discordapp.com/embed/avatars/3.png">
+                  <div>
+                    <p><span class="discord-author">z̸a̴l̷g̶o̸_̵u̶s̴e̷r̵</span><span class="discord-time">Hoy a las 14:08</span></p>
+                    <p class="discord-text">H̷̡̛͙e̴͎̚l̶̰͐l̸̛o̴̅͜ ̶w̴o̷r̶l̵d̷</p>
+                  </div>
+                </div>
+                <div class="preview-item" id="prev-zalgo">
+                  <div class="discord-msg">
+                    <div class="w-9"></div>
+                    <div class="discord-embed">
+                      <p class="discord-embed-title">🌀 Texto Zalgo bloqueado</p>
+                      <p class="discord-embed-desc">Mensaje eliminado por contener texto Zalgo.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="discord-msg pt-2">
+                  <img class="discord-avatar" src="https://cdn.discordapp.com/embed/avatars/4.png">
+                  <div>
+                    <p><span class="discord-author">spammer</span><span class="discord-time">Hoy a las 14:10</span></p>
+                    <p class="discord-text">@everyone @aquí revisen esto @usuario1 @usuario2 @usuario3</p>
+                  </div>
+                </div>
+                <div class="preview-item" id="prev-mention">
+                  <div class="discord-msg">
+                    <div class="w-9"></div>
+                    <div class="discord-embed">
+                      <p class="discord-embed-title">📣 Exceso de menciones</p>
+                      <p class="discord-embed-desc">Mensaje eliminado por mencionar a demasiados usuarios de golpe.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="discord-msg pt-2">
+                  <div class="discord-avatar" style="background:#5865f2; display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px;">🪝</div>
+                  <div>
+                    <p><span class="discord-author">Webhook-Externo<span class="discord-bot-tag">WEBHOOK</span></span><span class="discord-time">Hoy a las 14:12</span></p>
+                    <p class="discord-text">Mensaje automático desde un servicio externo no autorizado.</p>
+                  </div>
+                </div>
+                <div class="preview-item" id="prev-webhook">
+                  <div class="discord-msg">
+                    <div class="w-9"></div>
+                    <div class="discord-embed ok">
+                      <p class="discord-embed-title">🪝 Webhook no autorizado</p>
+                      <p class="discord-embed-desc">Mensaje de un webhook fuera de la lista blanca eliminado.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p class="text-xs text-muted mt-3">Activa o desactiva los interruptores de la izquierda para ver qué acciones tomaría AutoMod.</p>
+            </div>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- ===================== PASO 4: ANTINUKE & CUARENTENA ===================== -->
+    <section class="step-panel" id="step-antinuke">
+      <form action="{{ url_for('save_wick_antinuke') }}" method="POST" class="space-y-6" data-autosave>
+
+        <div class="bg-card border border-border rounded-xl p-6 space-y-5">
+          <label class="flex items-center justify-between gap-4 cursor-pointer">
+            <div>
+              <h2 class="text-lg font-bold text-white">💣 AntiNuke</h2>
+              <p class="text-xs text-muted mt-0.5">Monitorea acciones destructivas y castiga a quien no esté autorizado.</p>
+            </div>
+            <input type="checkbox" name="antinuke_enabled" class="switch" {% if config.antinuke.enabled %}checked{% endif %}>
+          </label>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {{ toggle_row("monitor_kicks_bans", "👢 Expulsiones y baneos masivos", "", config.antinuke.monitor_kicks_bans, small=True) }}
+            {{ toggle_row("monitor_role_creates", "🏷️ Creación de roles", "", config.antinuke.monitor_role_creates, small=True) }}
+            {{ toggle_row("monitor_role_deletes", "🗑️ Eliminación de roles", "", config.antinuke.monitor_role_deletes, small=True) }}
+            {{ toggle_row("monitor_channel_creates", "📁 Creación de canales", "", config.antinuke.monitor_channel_creates, small=True) }}
+            {{ toggle_row("monitor_channel_deletes", "🗑️ Eliminación de canales", "", config.antinuke.monitor_channel_deletes, small=True) }}
+            {{ toggle_row("monitor_webhook_creates", "🪝 Creación de webhooks", "", config.antinuke.monitor_webhook_creates, small=True) }}
+            {{ toggle_row("monitor_webhook_deletes", "🪝 Eliminación de webhooks", "", config.antinuke.monitor_webhook_deletes, small=True) }}
+          </div>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-6 space-y-5">
+          <label class="flex items-center justify-between gap-4 cursor-pointer">
+            <div>
+              <h2 class="text-lg font-bold text-white">🚧 Cuarentena</h2>
+              <p class="text-xs text-muted mt-0.5">Aísla automáticamente a administradores/miembros no autorizados detectados por AntiNuke.</p>
+            </div>
+            <input type="checkbox" name="quarantine_enabled" class="switch" {% if config.quarantine.enabled %}checked{% endif %}>
+          </label>
+
+          <div class="space-y-3">
+            {{ toggle_row("punish_unauthorized_admins_perms", "Administradores no autorizados (permisos)", "Sanciona a quien se otorgue permisos de administrador sin estar en la whitelist.", config.quarantine.punish_unauthorized_admins_perms) }}
+            {{ toggle_row("punish_unauthorized_admins_members", "Administradores no autorizados (acciones)", "Sanciona acciones destructivas hechas por administradores fuera de la whitelist.", config.quarantine.punish_unauthorized_admins_members) }}
+            {{ toggle_row("protect_everyone_main_roles", "Proteger @everyone y roles principales", "Bloquea cambios de permisos peligrosos sobre @everyone o el rol principal.", config.quarantine.protect_everyone_main_roles) }}
+            {{ toggle_row("guard_vanity_url", "Proteger URL de vanidad (vanity)", "Alerta si cambia la URL personalizada de invitación del servidor.", config.quarantine.guard_vanity_url) }}
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold uppercase text-muted mb-2">Rol de Cuarentena</label>
+            <select name="quarantine_role_id" class="w-full sm:w-1/2 bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+              <option value="" {% if not config.quarantine.quarantine_role_id %}selected{% endif %}>Sin rol de cuarentena</option>
+              {% for r in roles %}
+                <option value="{{ r.id }}" {% if config.quarantine.quarantine_role_id == r.id %}selected{% endif %}>@{{ r.name }}</option>
+              {% endfor %}
+            </select>
+            <p class="text-xs text-muted mt-2">Se aplica a los usuarios no autorizados detectados por AntiNuke, quitándoles el resto de sus roles.</p>
+          </div>
+        </div>
+
+        <div class="flex justify-between">
+          <button type="button" class="step-goto-btn text-sm text-muted hover:text-slate-100" data-goto="automod">← Anterior</button>
+          <button type="button" class="step-goto-btn bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5" data-goto="whitelists">Siguiente →</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ===================== PASO 5: WHITELISTS ===================== -->
+    <section class="step-panel" id="step-whitelists">
+      <form action="{{ url_for('save_wick_whitelists') }}" method="POST" class="bg-card border border-border rounded-xl p-6 space-y-5" data-autosave>
+        <div>
+          <h2 class="text-lg font-bold text-white mb-1">📋 Listas Blancas (Whitelists)</h2>
+          <p class="text-sm text-muted">
+            Miembros y Webhooks se identifican por ID (pégalos separados por comas -- el dashboard no tiene forma
+            de listar los miembros/webhooks reales del servidor). Roles, Canales y Categorías se seleccionan
+            directamente de tu servidor.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-1 border-b border-border pb-3">
+          <div class="wl-tab-btn active" data-wltab="spam">🌊 Spam</div>
+          <div class="wl-tab-btn" data-wltab="invites">🔗 Invitaciones</div>
+          <div class="wl-tab-btn" data-wltab="pings">📣 Pings</div>
+          <div class="wl-tab-btn" data-wltab="everyone">📢 @everyone</div>
+          <div class="wl-tab-btn" data-wltab="categories">🎫 Categorías Tickets</div>
+          <div class="wl-tab-btn" data-wltab="quarantine_users">🚧 Inmunes a Cuarentena</div>
+        </div>
+
+        {% for group_key, group_icon, group_label in [
+            ("spam", "🌊", "Lista Blanca de Spam"),
+            ("invites", "🔗", "Lista Blanca de Invitaciones"),
+            ("pings", "📣", "Lista Blanca de Pings"),
+            ("everyone", "📢", "Lista Blanca de @everyone"),
+        ] %}
+          <div class="wl-tab-panel {% if loop.first %}active{% endif %}" data-wlpanel="{{ group_key }}">
+            <h3 class="text-sm font-bold text-white mb-3">{{ group_icon }} {{ group_label }}</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div>
+                <label class="block text-xs font-bold uppercase text-muted mb-2">Roles</label>
+                {{ checkbox_picker("wl_" ~ group_key ~ "_roles", roles, config.whitelists[group_key].roles, "@") }}
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase text-muted mb-2">Canales</label>
+                {{ checkbox_picker("wl_" ~ group_key ~ "_channels", channels, config.whitelists[group_key].channels, "#") }}
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase text-muted mb-2">Categorías</label>
+                {{ checkbox_picker("wl_" ~ group_key ~ "_categories", categories, config.whitelists[group_key].categories, "") }}
+              </div>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-xs font-bold uppercase text-muted mb-2">Miembros (IDs)</label>
+                  {{ id_list_input("wl_" ~ group_key ~ "_members", config.whitelists[group_key].members, "123456789012345678, 987654321098765432") }}
+                </div>
+                <div>
+                  <label class="block text-xs font-bold uppercase text-muted mb-2">Webhooks (IDs)</label>
+                  {{ id_list_input("wl_" ~ group_key ~ "_webhooks", config.whitelists[group_key].webhooks, "111111111111111111") }}
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+
+        <div class="wl-tab-panel" data-wlpanel="categories">
+          <h3 class="text-sm font-bold text-white mb-3">🎫 Categorías permitidas para creación de canales (Tickets)</h3>
+          <p class="text-xs text-muted mb-3">Canales creados fuera de estas categorías (ej. por bots de tickets no autorizados) se eliminan automáticamente si AntiNuke lo detecta.</p>
+          {{ checkbox_picker("wl_channel_creation_categories", categories, config.whitelists.channel_creation_categories, "") }}
+        </div>
+
+        <div class="wl-tab-panel" data-wlpanel="quarantine_users">
+          <h3 class="text-sm font-bold text-white mb-3">🚧 Usuarios inmunes a Cuarentena (IDs)</h3>
+          <p class="text-xs text-muted mb-3">Estos usuarios nunca recibirán el rol de Cuarentena, sin importar lo que detecte AntiNuke.</p>
+          {{ id_list_input("wl_quarantine_users", config.whitelists.quarantine_users, "123456789012345678, 987654321098765432") }}
+        </div>
+
+        <div class="flex justify-between pt-2">
+          <button type="button" class="step-goto-btn text-sm text-muted hover:text-slate-100" data-goto="antinuke">← Anterior</button>
+          <button type="button" class="step-goto-btn bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5" data-goto="joingate">Siguiente →</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ===================== PASO 6: JOINGATE ===================== -->
+    <section class="step-panel" id="step-joingate">
+      <form action="{{ url_for('save_wick_joingate') }}" method="POST" class="bg-card border border-border rounded-xl p-6 space-y-5" data-autosave>
+        <label class="flex items-center justify-between gap-4 cursor-pointer">
+          <div>
+            <h2 class="text-lg font-bold text-white">🚪 JoinGate</h2>
+            <p class="text-xs text-muted mt-0.5">Filtra a cada nuevo miembro que entra al servidor antes de dejarlo pasar.</p>
+          </div>
+          <input type="checkbox" name="joingate_enabled" class="switch" {% if config.joingate.enabled %}checked{% endif %}>
+        </label>
+
+        <div class="space-y-3">
+          {{ toggle_row("target_young_accounts", "🕐 Cuentas recientes", "Cuentas de Discord más nuevas que la antigüedad mínima configurada.", config.joingate.target_young_accounts) }}
+          <div class="pl-4 -mt-2">
+            <label class="block text-xs font-bold uppercase text-muted mb-2">Antigüedad mínima de la cuenta (horas)</label>
+            <input type="number" name="min_account_age_hours" min="0" step="1" value="{{ config.joingate.min_account_age_hours }}"
+                   class="w-full sm:w-1/3 bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+          </div>
+          {{ toggle_row("target_no_pfp", "🖼️ Sin foto de perfil", "Cuentas que todavía usan el avatar por defecto de Discord.", config.joingate.target_no_pfp) }}
+          {{ toggle_row("target_invite_in_name", "🔗 Invitación en el nombre", "El nombre de usuario o apodo contiene un enlace de invitación.", config.joingate.target_invite_in_name) }}
+          {{ toggle_row("target_suspicious_nicks", "🕵️ Nicks sospechosos", "Nombres con patrones típicos de cuentas de raid/spam.", config.joingate.target_suspicious_nicks) }}
+          {{ toggle_row("target_unauthorized_bots", "🤖 Bots no autorizados", "Cualquier cuenta de tipo bot que intente unirse sin estar en la whitelist.", config.joingate.target_unauthorized_bots) }}
+          {{ toggle_row("target_unverified_bots", "🤖 Bots sin verificar de Discord", "Bots que no han pasado el proceso de verificación oficial de Discord.", config.joingate.target_unverified_bots) }}
+        </div>
+
+        <div class="border-t border-border pt-5">
+          <label class="block text-xs font-bold uppercase text-muted mb-2">Acción automática</label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <label class="relative cursor-pointer">
+              <input type="radio" name="action" value="kick" class="peer sr-only" {% if config.joingate.action == 'kick' %}checked{% endif %}>
+              <div class="border border-border rounded-lg px-4 py-4 transition-colors peer-checked:border-accent peer-checked:bg-accent/10">
+                <p class="text-sm font-semibold text-white">👢 {{ joingate_actions.kick }}</p>
+                <p class="text-xs text-muted mt-1">El usuario es expulsado y puede volver a unirse con una nueva invitación.</p>
+              </div>
+            </label>
+            <label class="relative cursor-pointer">
+              <input type="radio" name="action" value="ban" class="peer sr-only" {% if config.joingate.action == 'ban' %}checked{% endif %}>
+              <div class="border border-border rounded-lg px-4 py-4 transition-colors peer-checked:border-err peer-checked:bg-err/10">
+                <p class="text-sm font-semibold text-white">🔨 {{ joingate_actions.ban }}</p>
+                <p class="text-xs text-muted mt-1">El usuario es baneado y no podrá volver a entrar.</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="flex justify-between pt-2">
+          <button type="button" class="step-goto-btn text-sm text-muted hover:text-slate-100" data-goto="whitelists">← Anterior</button>
+          <button type="button" id="wick-finish-btn" class="bg-ok hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5">✅ Finalizar</button>
+        </div>
+      </form>
+    </section>
+
+  </main>
+
+  <!-- Barra flotante de cambios sin guardar -->
+  <div id="unsaved-bar">
+    <span class="unsaved-text">⚠️ Tienes cambios sin guardar en esta sección</span>
+    <div class="unsaved-actions">
+      <button type="button" id="unsaved-cancel-btn" class="btn-discard-bar">Cancelar</button>
+      <button type="button" id="unsaved-save-btn" class="btn-save-bar">Guardar cambios</button>
+    </div>
+  </div>
+
+  <!-- Modal de bloqueo de navegación -->
+  <div id="nav-guard-modal">
+    <div class="modal-box">
+      <h3>Tienes cambios sin guardar</h3>
+      <p>¿Quieres guardarlos antes de salir? Si continúas sin guardar, perderás los cambios realizados en esta sección.</p>
+      <div class="modal-actions">
+        <button type="button" id="nav-guard-save" class="btn-modal-primary">Guardar</button>
+        <button type="button" id="nav-guard-discard" class="btn-modal-danger">Descartar y salir</button>
+        <button type="button" id="nav-guard-stay" class="btn-modal-ghost">Permanecer aquí</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ------------------------------------------------------------------
+    // Stepper: cambia de paso sin recargar la página. Todos los <form> de
+    // todos los pasos permanecen en el DOM (solo se ocultan con display:none),
+    // así que el gestor de cambios sin guardar los sigue vigilando a todos
+    // a la vez, se esté viendo el paso que se esté viendo.
+    // ------------------------------------------------------------------
+    function activateStep(stepId) {
+      document.querySelectorAll(".step-panel").forEach((el) => {
+        el.classList.toggle("active", el.id === "step-" + stepId);
+      });
+      document.querySelectorAll(".step-tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.step === stepId);
+      });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    document.querySelectorAll(".step-tab-btn[data-step]").forEach((btn) => {
+      btn.addEventListener("click", () => activateStep(btn.dataset.step));
+    });
+    document.querySelectorAll(".step-goto-btn[data-goto]").forEach((btn) => {
+      btn.addEventListener("click", () => activateStep(btn.dataset.goto));
+    });
+    const finishBtn = document.getElementById("wick-finish-btn");
+    if (finishBtn) {
+      finishBtn.addEventListener("click", () => activateStep("inicio"));
+    }
+
+    // Sub-tabs de Whitelists
+    document.querySelectorAll(".wl-tab-btn[data-wltab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".wl-tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+        document.querySelectorAll(".wl-tab-panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.dataset.wlpanel === btn.dataset.wltab);
+        });
+      });
+    });
+
+    // ------------------------------------------------------------------
+    // Pickers de entidades (roles/canales/categorías): cada checkbox
+    // marcado/desmarcado recalcula el input oculto con la lista de IDs
+    // separados por comas, y dispara un "change" que burbujea hasta el
+    // form para que el gestor de cambios sin guardar lo detecte.
+    // ------------------------------------------------------------------
+    document.querySelectorAll(".picker-instance").forEach((instance) => {
+      const hiddenInput = instance.querySelector(".picker-hidden-input");
+      const checkboxes = instance.querySelectorAll(".picker-checkbox");
+      checkboxes.forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const selected = Array.from(checkboxes).filter((c) => c.checked).map((c) => c.value);
+          hiddenInput.value = selected.join(",");
+          hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+      });
+    });
+
+    // Previsualización de chat: los toggles con [data-preview-target] en su
+    // wrapper muestran/ocultan el mensaje de ejemplo correspondiente.
+    document.querySelectorAll("[data-preview-target]").forEach((wrapper) => {
+      const checkbox = wrapper.querySelector("input[type=checkbox]");
+      const targetId = wrapper.dataset.previewTarget;
+      const target = document.getElementById(targetId);
+      if (!checkbox || !target) return;
+      function sync() { target.classList.toggle("preview-hidden", !checkbox.checked); }
+      checkbox.addEventListener("change", sync);
+      sync();
+    });
+
+    // ------------------------------------------------------------------
+    // Gestor global de cambios sin guardar (estilo Discord / Shopify):
+    // detecta cambios en CUALQUIERA de los 5 forms (uno por paso), muestra
+    // la barra flotante, permite guardar todo vía AJAX o descartar/
+    // restaurar, y bloquea la navegación si hay cambios.
+    // ------------------------------------------------------------------
+    (function unsavedChangesManager() {
+      const forms = Array.from(document.querySelectorAll("form[data-autosave]"));
+      if (!forms.length) return;
+
+      const bar = document.getElementById("unsaved-bar");
+      const saveBtn = document.getElementById("unsaved-save-btn");
+      const cancelBtn = document.getElementById("unsaved-cancel-btn");
+      const modal = document.getElementById("nav-guard-modal");
+      const modalSave = document.getElementById("nav-guard-save");
+      const modalDiscard = document.getElementById("nav-guard-discard");
+      const modalStay = document.getElementById("nav-guard-stay");
+
+      let isDirty = false;
+      let isRestoring = false;
+      let pendingHref = null;
+      const snapshots = new Map();
+
+      function captureSnapshot(form) {
+        snapshots.set(form, new FormData(form));
+      }
+      forms.forEach(captureSnapshot);
+
+      forms.forEach((form) => {
+        form.addEventListener("submit", (e) => e.preventDefault());
+      });
+
+      function setDirty(state) {
+        isDirty = state;
+        bar.classList.toggle("show", isDirty);
+      }
+
+      function markDirty() {
+        if (isRestoring) return;
+        setDirty(true);
+      }
+
+      forms.forEach((form) => {
+        form.addEventListener("input", markDirty);
+        form.addEventListener("change", markDirty);
+      });
+
+      function restoreSnapshot(form) {
+        const data = snapshots.get(form);
+        if (!data) return;
+        isRestoring = true;
+
+        form.querySelectorAll("input, select, textarea").forEach((el) => {
+          if (!el.name) return;
+          if (el.type === "checkbox" || el.type === "radio") {
+            el.checked = data.getAll(el.name).includes(el.value);
+          } else {
+            el.value = data.has(el.name) ? data.get(el.name) : "";
+          }
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        isRestoring = false;
+      }
+
+      function setBarSaving(saving) {
+        saveBtn.disabled = saving;
+        saveBtn.innerHTML = saving
+          ? '<span class="spinner"></span> Guardando…'
+          : "Guardar cambios";
+      }
+
+      async function saveAllForms() {
+        setBarSaving(true);
+        try {
+          await Promise.all(
+            forms.map((form) => {
+              const data = new FormData(form);
+              return fetch(form.action, { method: "POST", body: data }).then((res) => {
+                if (!res.ok) throw new Error("save failed: " + form.action);
+                return res;
+              });
+            })
+          );
+          forms.forEach(captureSnapshot);
+          setDirty(false);
+          return true;
+        } catch (err) {
+          alert("Ocurrió un error al guardar los cambios. Inténtalo de nuevo.");
+          return false;
+        } finally {
+          setBarSaving(false);
+        }
+      }
+
+      saveBtn.addEventListener("click", () => { saveAllForms(); });
+
+      cancelBtn.addEventListener("click", () => {
+        forms.forEach(restoreSnapshot);
+        setDirty(false);
+      });
+
+      document.addEventListener("click", (e) => {
+        const link = e.target.closest("a[href]");
+        if (!link) return;
+        if (link.target === "_blank") return;
+        if (link.href.startsWith("javascript:")) return;
+        if (!isDirty) return;
+        e.preventDefault();
+        pendingHref = link.href;
+        modal.classList.add("show");
+      });
+
+      modalStay.addEventListener("click", () => {
+        modal.classList.remove("show");
+        pendingHref = null;
+      });
+
+      modalDiscard.addEventListener("click", () => {
+        modal.classList.remove("show");
+        const href = pendingHref;
+        pendingHref = null;
+        setDirty(false);
+        if (href) window.location.href = href;
+      });
+
+      modalSave.addEventListener("click", async () => {
+        const ok = await saveAllForms();
+        if (ok) {
+          modal.classList.remove("show");
+          if (pendingHref) {
+            const href = pendingHref;
+            pendingHref = null;
+            window.location.href = href;
+          }
+        }
+      });
+
+      window.addEventListener("beforeunload", (e) => {
+        if (!isDirty) return;
+        e.preventDefault();
+        e.returnValue = "";
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard · Configuración de YouTube</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          base: "#07080c",
+          panel: "#171a23",
+          card: "#12141c",
+          border: "#252836",
+          accent: "#5865f2",
+          muted: "#8b8fa3",
+          ok: "#23a55a",
+          err: "#ed4245",
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: "Segoe UI", Roboto, -apple-system, sans-serif; }
+
+  .switch {
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: #2a2f3d;
+    position: relative;
+    flex-shrink: 0;
+    appearance: none;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.15s ease;
+  }
+  .switch::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s ease;
+  }
+  .switch:checked { background: #23a55a; }
+  .switch:checked::before { transform: translateX(18px); }
+
+  .var-chip {
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .var-chip:hover { border-color: #5865f2; background: rgba(88,101,242,0.1); }
+
+  /* --- Pestañas de secciones del módulo --- */
+  .section-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    border-bottom: 1px solid #20232e;
+    margin-bottom: 20px;
+  }
+  .section-tab-btn {
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #8b8fa3;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .section-tab-btn.active { color: #fff; border-bottom-color: #5865f2; }
+  .section-tab-btn:hover { color: #e3e5e8; }
+  .section-tab-panel.hidden { display: none; }
+
+  /* --- Barra flotante de cambios sin guardar --- */
+  #unsaved-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%) translateY(120%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+    z-index: 100;
+    background: #1e2025;
+    border: 1px solid #3a3d44;
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 92vw;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #unsaved-bar.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+  #unsaved-bar .unsaved-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f5c451;
+    white-space: nowrap;
+  }
+  #unsaved-bar .unsaved-actions { display: flex; gap: 8px; }
+  .btn-save-bar {
+    background: #23a55a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-save-bar:hover { background: #1c8a4a; }
+  .btn-save-bar:disabled { opacity: 0.6; cursor: default; }
+  .btn-discard-bar {
+    background: transparent;
+    color: #e3e5e8;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-discard-bar:hover { background: #2b2d31; border-color: #ed4245; color: #ed4245; }
+
+  /* --- Modal de bloqueo de navegación --- */
+  #nav-guard-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(5,6,10,0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  #nav-guard-modal.show { opacity: 1; pointer-events: auto; }
+  #nav-guard-modal .modal-box {
+    background: #171a23;
+    border: 1px solid #252836;
+    border-radius: 14px;
+    padding: 24px;
+    width: 380px;
+    max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    transform: translateY(10px);
+    transition: transform 0.15s ease;
+  }
+  #nav-guard-modal.show .modal-box { transform: translateY(0); }
+  #nav-guard-modal h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  #nav-guard-modal p { font-size: 13px; color: #8b8fa3; margin-bottom: 20px; line-height: 1.5; }
+  #nav-guard-modal .modal-actions { display: flex; flex-direction: column; gap: 8px; }
+  .btn-modal-primary {
+    background: #5865f2; color: #fff; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-primary:hover { background: #4752c4; }
+  .btn-modal-danger {
+    background: transparent; color: #ed4245; border: 1px solid #3a3d44; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-danger:hover { background: rgba(237,66,69,0.1); border-color: #ed4245; }
+  .btn-modal-ghost {
+    background: transparent; color: #8b8fa3; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-ghost:hover { color: #e3e5e8; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
+    animation: spin 0.6s linear infinite; display: inline-block;
+  }
+</style>
+</head>
+<body class="bg-base text-slate-100 min-h-screen">
+
+{% include "_simulation_banner.html" %}
+
+{% macro vars_panel(panel_id) %}
+  <div class="border border-border rounded-lg">
+    <button type="button" class="vars-toggle-btn w-full flex items-center justify-between px-4 py-3 text-xs font-bold uppercase text-muted hover:text-slate-100"
+            data-panel="{{ panel_id }}">
+      <span>🧩 Variables disponibles</span>
+      <span class="caret">▾</span>
+    </button>
+    <div id="{{ panel_id }}" class="hidden px-4 pb-4 flex flex-wrap gap-2">
+      {% for v in variables %}
+        <span class="var-chip text-xs font-mono bg-panel border border-border rounded-full px-3 py-1.5"
+              data-token="{{ v.token }}" title="{{ v.label }}">
+          {{ v.token }} <span class="text-muted">· {{ v.label }}</span>
+        </span>
+      {% endfor %}
+    </div>
+    <p class="px-4 pb-3 text-xs text-muted">Haz clic en una variable para insertarla en el campo seleccionado.</p>
+  </div>
+{% endmacro %}
+
+{% macro youtube_section(prefix, cfg, title_icon, title_text, help_text) %}
+  <label class="flex items-center justify-between border border-border rounded-lg px-4 py-3 cursor-pointer">
+    <div>
+      <p class="text-sm font-semibold text-white">Habilitar notificaciones de {{ title_text|lower }}</p>
+      <p class="text-xs text-muted">{{ help_text }}</p>
+    </div>
+    <input type="checkbox" name="{{ prefix }}_enabled" class="switch" {% if cfg.enabled %}checked{% endif %}>
+  </label>
+
+  <div>
+    <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de YouTube (URL, @handle o ID)</label>
+    <input type="text" name="{{ prefix }}_channel_id" value="{{ cfg.channel_id }}"
+           placeholder="https://www.youtube.com/@tu_canal o @tu_canal"
+           class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:border-accent">
+    <p class="text-xs text-muted mt-2">Puedes pegar la URL completa del canal, su @handle o el ID (empieza por "UC"). El bot lo detecta automáticamente.</p>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div>
+      <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de Discord</label>
+      <select name="{{ prefix }}_discord_channel_id"
+              class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+        <option value="" disabled {% if not cfg.discord_channel_id %}selected{% endif %}>Selecciona un canal…</option>
+        {% for c in channels %}
+          <option value="{{ c.id }}" {% if cfg.discord_channel_id == c.id %}selected{% endif %}>#{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not channels %}
+        <p class="text-xs text-err mt-2">No se encontraron canales. Verifica que el bot esté en el servidor.</p>
+      {% endif %}
+    </div>
+    <div>
+      <label class="block text-xs font-bold uppercase text-muted mb-2">Rol para Ping (opcional)</label>
+      <select name="{{ prefix }}_ping_role_id"
+              class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+        <option value="" {% if not cfg.ping_role_id %}selected{% endif %}>Sin rol (no menciona a nadie)</option>
+        {% for r in roles %}
+          <option value="{{ r.id }}" {% if cfg.ping_role_id == r.id %}selected{% endif %}>@{{ r.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  {{ vars_panel("vars-panel-" ~ prefix) }}
+
+  <div>
+    <label class="block text-xs font-bold uppercase text-muted mb-2">Mensaje</label>
+    <textarea name="{{ prefix }}_mensaje" rows="3" data-var-target
+              class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm resize-y focus:outline-none focus:border-accent">{{ cfg.mensaje }}</textarea>
+  </div>
+{% endmacro %}
+
+  <header class="flex items-center justify-between px-8 py-5 border-b border-border">
+    <div class="flex items-center gap-3 text-sm">
+      <a href="{{ url_for('index') }}" class="text-muted hover:text-slate-100">← Módulos</a>
+      <span class="text-border">|</span>
+      <h1 class="text-xl font-bold text-white">YouTube</h1>
+    </div>
+    <div class="flex items-center gap-6 text-sm text-muted">
+      <span>ES ES</span>
+      <span class="text-slate-200">@nunooo_</span>
+    </div>
+  </header>
+
+  <main class="px-6 py-8 max-w-4xl mx-auto space-y-6">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="rounded-lg px-4 py-3 text-sm border
+            {% if category == 'success' %} bg-ok/10 border-ok text-ok
+            {% else %} bg-err/10 border-err text-err {% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% if not config.modules.youtube %}
+      <div class="rounded-lg px-4 py-3 text-sm border bg-amber-500/10 border-amber-500 text-amber-400 flex items-center justify-between gap-4 flex-wrap">
+        <span>⚠️ El módulo de YouTube está <strong>desactivado</strong>. No se enviará ninguna notificación hasta que lo actives.</span>
+        <a href="{{ url_for('index') }}" class="text-xs font-semibold underline whitespace-nowrap">Activar en Módulos</a>
+      </div>
+    {% endif %}
+
+    <div class="bg-card border border-border rounded-xl p-6">
+      <!-- Pestañas de secciones -->
+      <div class="section-tabs">
+        <button type="button" class="section-tab-btn active" data-section="tab-videos">🎬 Vídeos</button>
+        <button type="button" class="section-tab-btn" data-section="tab-streams">🔴 Directos</button>
+      </div>
+
+      <form action="{{ url_for('save_youtube') }}" method="POST" class="space-y-6" data-autosave>
+
+        <!-- ============================================================ -->
+        <!-- 1. Notificaciones de vídeos subidos -->
+        <!-- ============================================================ -->
+        <div id="tab-videos" class="section-tab-panel space-y-5">
+          {{ youtube_section("videos", config.youtube.videos, "🎬", "Vídeos", "Avisa en Discord cada vez que subes un vídeo nuevo al canal.") }}
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- 2. Notificaciones de directos / streams -->
+        <!-- ============================================================ -->
+        <div id="tab-streams" class="section-tab-panel hidden space-y-5">
+          {{ youtube_section("streams", config.youtube.streams, "🔴", "Directos", "Avisa en Discord en cuanto empiezas una transmisión en directo.") }}
+        </div>
+
+      </form>
+    </div>
+
+  </main>
+
+  <!-- Barra flotante de cambios sin guardar -->
+  <div id="unsaved-bar">
+    <span class="unsaved-text">⚠️ Tienes cambios sin guardar en esta sección</span>
+    <div class="unsaved-actions">
+      <button type="button" id="unsaved-cancel-btn" class="btn-discard-bar">Cancelar</button>
+      <button type="button" id="unsaved-save-btn" class="btn-save-bar">Guardar cambios</button>
+    </div>
+  </div>
+
+  <!-- Modal de bloqueo de navegación -->
+  <div id="nav-guard-modal">
+    <div class="modal-box">
+      <h3>Tienes cambios sin guardar</h3>
+      <p>¿Quieres guardarlos antes de salir? Si continúas sin guardar, perderás los cambios realizados en esta sección.</p>
+      <div class="modal-actions">
+        <button type="button" id="nav-guard-save" class="btn-modal-primary">Guardar</button>
+        <button type="button" id="nav-guard-discard" class="btn-modal-danger">Descartar y salir</button>
+        <button type="button" id="nav-guard-stay" class="btn-modal-ghost">Permanecer aquí</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ------------------------------------------------------------------
+    // Pestañas de secciones (Vídeos / Directos)
+    // ------------------------------------------------------------------
+    function activateSection(sectionId) {
+      document.querySelectorAll(".section-tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.section === sectionId);
+      });
+      document.querySelectorAll(".section-tab-panel").forEach((panel) => {
+        panel.classList.toggle("hidden", panel.id !== sectionId);
+      });
+    }
+
+    document.querySelectorAll(".section-tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => activateSection(btn.dataset.section));
+    });
+
+    // Paneles de variables: mostrar/ocultar
+    document.querySelectorAll(".vars-toggle-btn").forEach((btn) => {
+      const panelEl = document.getElementById(btn.dataset.panel);
+      const caret = btn.querySelector(".caret");
+      btn.addEventListener("click", () => {
+        panelEl.classList.toggle("hidden");
+        caret.textContent = panelEl.classList.contains("hidden") ? "▾" : "▴";
+      });
+    });
+
+    // Insertar variable en el último campo enfocado (con data-var-target)
+    let lastFocused = null;
+    document.querySelectorAll("[data-var-target]").forEach((el) => {
+      el.addEventListener("focus", () => { lastFocused = el; });
+    });
+
+    document.querySelectorAll(".var-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        if (!lastFocused) return;
+        const token = chip.dataset.token;
+        const start = lastFocused.selectionStart ?? lastFocused.value.length;
+        const end = lastFocused.selectionEnd ?? lastFocused.value.length;
+        const value = lastFocused.value;
+        lastFocused.value = value.slice(0, start) + token + value.slice(end);
+        lastFocused.focus();
+        const cursor = start + token.length;
+        lastFocused.setSelectionRange(cursor, cursor);
+      });
+    });
+
+    // ------------------------------------------------------------------
+    // Gestor global de cambios sin guardar (estilo Discord / Shopify):
+    // detecta cambios en el form[data-autosave] -- incluso en la pestaña
+    // oculta, ya que ocultarla con CSS no la excluye del FormData -- muestra
+    // la barra flotante, permite guardar todo vía AJAX o descartar/
+    // restaurar, y bloquea la navegación si hay cambios.
+    // ------------------------------------------------------------------
+    (function unsavedChangesManager() {
+      const forms = Array.from(document.querySelectorAll("form[data-autosave]"));
+      if (!forms.length) return;
+
+      const bar = document.getElementById("unsaved-bar");
+      const saveBtn = document.getElementById("unsaved-save-btn");
+      const cancelBtn = document.getElementById("unsaved-cancel-btn");
+      const modal = document.getElementById("nav-guard-modal");
+      const modalSave = document.getElementById("nav-guard-save");
+      const modalDiscard = document.getElementById("nav-guard-discard");
+      const modalStay = document.getElementById("nav-guard-stay");
+
+      let isDirty = false;
+      let isRestoring = false;
+      let pendingHref = null;
+      const snapshots = new Map();
+
+      function captureSnapshot(form) {
+        snapshots.set(form, new FormData(form));
+      }
+      forms.forEach(captureSnapshot);
+
+      forms.forEach((form) => {
+        form.addEventListener("submit", (e) => e.preventDefault());
+      });
+
+      function setDirty(state) {
+        isDirty = state;
+        bar.classList.toggle("show", isDirty);
+      }
+
+      function markDirty() {
+        if (isRestoring) return;
+        setDirty(true);
+      }
+
+      forms.forEach((form) => {
+        form.addEventListener("input", markDirty);
+        form.addEventListener("change", markDirty);
+      });
+
+      function restoreSnapshot(form) {
+        const data = snapshots.get(form);
+        if (!data) return;
+        isRestoring = true;
+
+        form.querySelectorAll("input, select, textarea").forEach((el) => {
+          if (!el.name) return;
+          if (el.type === "checkbox") {
+            el.checked = data.has(el.name);
+          } else {
+            el.value = data.has(el.name) ? data.get(el.name) : "";
+          }
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        isRestoring = false;
+      }
+
+      function setBarSaving(saving) {
+        saveBtn.disabled = saving;
+        saveBtn.innerHTML = saving
+          ? '<span class="spinner"></span> Guardando…'
+          : "Guardar cambios";
+      }
+
+      async function saveAllForms() {
+        setBarSaving(true);
+        try {
+          await Promise.all(
+            forms.map((form) => {
+              const data = new FormData(form);
+              return fetch(form.action, { method: "POST", body: data }).then((res) => {
+                if (!res.ok) throw new Error("save failed: " + form.action);
+                return res;
+              });
+            })
+          );
+          forms.forEach(captureSnapshot);
+          setDirty(false);
+          return true;
+        } catch (err) {
+          alert("Ocurrió un error al guardar los cambios. Inténtalo de nuevo.");
+          return false;
+        } finally {
+          setBarSaving(false);
+        }
+      }
+
+      saveBtn.addEventListener("click", () => { saveAllForms(); });
+
+      cancelBtn.addEventListener("click", () => {
+        forms.forEach(restoreSnapshot);
+        setDirty(false);
+      });
+
+      document.addEventListener("click", (e) => {
+        const link = e.target.closest("a[href]");
+        if (!link) return;
+        if (link.target === "_blank") return;
+        if (link.href.startsWith("javascript:")) return;
+        if (!isDirty) return;
+        e.preventDefault();
+        pendingHref = link.href;
+        modal.classList.add("show");
+      });
+
+      modalStay.addEventListener("click", () => {
+        modal.classList.remove("show");
+        pendingHref = null;
+      });
+
+      modalDiscard.addEventListener("click", () => {
+        modal.classList.remove("show");
+        const href = pendingHref;
+        pendingHref = null;
+        setDirty(false);
+        if (href) window.location.href = href;
+      });
+
+      modalSave.addEventListener("click", async () => {
+        const ok = await saveAllForms();
+        if (ok) {
+          modal.classList.remove("show");
+          if (pendingHref) {
+            const href = pendingHref;
+            pendingHref = null;
+            window.location.href = href;
+          }
+        }
+      });
+
+      window.addEventListener("beforeunload", (e) => {
+        if (!isDirty) return;
+        e.preventDefault();
+        e.returnValue = "";
+      });
+    })();
+  </script>
+</body>
+</html>

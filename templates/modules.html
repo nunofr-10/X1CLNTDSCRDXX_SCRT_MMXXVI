@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard · Módulos</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          base: "#07080c",
+          card: "#12141c",
+          border: "#20232e",
+          accent: "#5865f2",
+          muted: "#8b8fa3",
+          ok: "#23a55a",
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: "Segoe UI", Roboto, -apple-system, sans-serif; }
+
+  .bg-glow {
+    background:
+      radial-gradient(circle at 15% 0%, rgba(88, 101, 242, 0.18), transparent 45%),
+      radial-gradient(circle at 85% 20%, rgba(35, 165, 90, 0.10), transparent 40%),
+      #07080c;
+  }
+
+  .toggle {
+    width: 44px;
+    height: 25px;
+    border-radius: 999px;
+    background: #2a2f3d;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    flex-shrink: 0;
+  }
+  .toggle.on { background: #23a55a; }
+  .toggle .knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+  .toggle.on .knob { transform: translateX(19px); }
+
+  .glass {
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.00));
+    backdrop-filter: blur(6px);
+  }
+
+  /* --- Barra flotante de cambios sin guardar --- */
+  #unsaved-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%) translateY(120%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+    z-index: 100;
+    background: #1e2025;
+    border: 1px solid #3a3d44;
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 92vw;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #unsaved-bar.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+  #unsaved-bar .unsaved-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f5c451;
+    white-space: nowrap;
+  }
+  #unsaved-bar .unsaved-actions { display: flex; gap: 8px; }
+  .btn-save-bar {
+    background: #23a55a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-save-bar:hover { background: #1c8a4a; }
+  .btn-save-bar:disabled { opacity: 0.6; cursor: default; }
+  .btn-discard-bar {
+    background: transparent;
+    color: #e3e5e8;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-discard-bar:hover { background: #2b2d31; border-color: #ed4245; color: #ed4245; }
+
+  /* --- Modal de bloqueo de navegación --- */
+  #nav-guard-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(5,6,10,0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  #nav-guard-modal.show { opacity: 1; pointer-events: auto; }
+  #nav-guard-modal .modal-box {
+    background: #171a23;
+    border: 1px solid #252836;
+    border-radius: 14px;
+    padding: 24px;
+    width: 380px;
+    max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    transform: translateY(10px);
+    transition: transform 0.15s ease;
+  }
+  #nav-guard-modal.show .modal-box { transform: translateY(0); }
+  #nav-guard-modal h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  #nav-guard-modal p { font-size: 13px; color: #8b8fa3; margin-bottom: 20px; line-height: 1.5; }
+  #nav-guard-modal .modal-actions { display: flex; flex-direction: column; gap: 8px; }
+  .btn-modal-primary {
+    background: #5865f2; color: #fff; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-primary:hover { background: #4752c4; }
+  .btn-modal-danger {
+    background: transparent; color: #ed4245; border: 1px solid #3a3d44; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-danger:hover { background: rgba(237,66,69,0.1); border-color: #ed4245; }
+  .btn-modal-ghost {
+    background: transparent; color: #8b8fa3; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-ghost:hover { color: #e3e5e8; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
+    animation: spin 0.6s linear infinite; display: inline-block;
+  }
+</style>
+</head>
+<body class="bg-glow text-slate-100 min-h-screen">
+
+{% include "_simulation_banner.html" %}
+
+{% macro module_card(mod, enabled, field_name, config_url, icon, allowed=True) %}
+  <div class="glass border border-border rounded-2xl p-7 shadow-2xl shadow-black/40 transition-colors
+              {% if allowed %}hover:border-accent/50{% else %}opacity-60{% endif %}">
+    <div class="flex items-start justify-between mb-3">
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="w-11 h-11 rounded-xl bg-accent/15 flex items-center justify-center text-xl">{{ icon }}</div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h3 class="text-xl font-bold text-white">{{ mod.name }}</h3>
+            {% if not allowed %}
+              <span class="text-[10px] font-bold uppercase bg-red-500/15 text-red-400 px-2 py-0.5 rounded-full tracking-wide">🔒 No contratado</span>
+            {% elif mod.badge %}
+              <span class="text-[10px] font-bold uppercase bg-ok/15 text-ok px-2 py-0.5 rounded-full tracking-wide">{{ mod.badge }}</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      {% if allowed %}
+        <div class="module-toggle-wrap">
+          <input type="hidden" name="{{ field_name }}" class="module-state-input" value="{{ 'true' if enabled else 'false' }}">
+          <div class="toggle module-toggle {% if enabled %}on{% endif %}">
+            <div class="knob"></div>
+          </div>
+        </div>
+      {% else %}
+        <div class="text-xl" title="Módulo no contratado">🔒</div>
+      {% endif %}
+    </div>
+
+    <p class="text-sm text-muted leading-relaxed mb-6">{{ mod.description }}</p>
+
+    {% if allowed %}
+      <a href="{{ config_url }}"
+         class="inline-flex items-center gap-2 bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5 transition-colors">
+        ⚙ Configuración
+      </a>
+    {% else %}
+      <div class="inline-flex items-center gap-2 bg-card border border-border text-muted text-sm font-semibold rounded-lg px-5 py-2.5 cursor-not-allowed">
+        🔒 Módulo no contratado
+      </div>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+  <header class="flex items-center justify-between px-8 py-5 border-b border-border">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-full bg-gradient-to-br from-accent to-indigo-800"></div>
+      <h1 class="text-lg font-bold">pruebaaa bot</h1>
+    </div>
+    <div class="flex items-center gap-4 text-sm text-muted">
+      {% if user %}
+        {% if is_admin_user %}
+          <a href="{{ url_for('admin_panel') }}"
+             class="text-xs font-semibold text-accent hover:text-indigo-400 border border-accent/40 rounded-lg px-3 py-1.5">
+            🛠 Panel Admin
+          </a>
+        {% endif %}
+        {% if user.avatar %}
+          <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png" class="w-8 h-8 rounded-full">
+        {% endif %}
+        <span class="text-slate-200">{{ user.username }}</span>
+        <a href="{{ url_for('logout') }}" class="text-muted hover:text-slate-100">Salir</a>
+      {% else %}
+        <a href="{{ url_for('login') }}"
+           class="bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-4 py-2 transition-colors">
+          Conectar con Discord
+        </a>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="px-6 py-16 max-w-4xl mx-auto">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="mb-6 rounded-lg px-4 py-3 text-sm border
+            {% if category == 'success' %} bg-ok/10 border-ok text-ok
+            {% else %} bg-red-500/10 border-red-500 text-red-400 {% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% if not user %}
+      <!-- Estado: sin sesión -->
+      <div class="glass border border-border rounded-2xl p-10 text-center">
+        <div class="text-4xl mb-4">🔒</div>
+        <h2 class="text-2xl font-extrabold mb-2">Conecta tu cuenta de Discord</h2>
+        <p class="text-sm text-muted mb-6">Necesitas iniciar sesión para ver y configurar los servidores donde está tu bot.</p>
+        <a href="{{ url_for('login') }}"
+           class="inline-flex items-center gap-2 bg-accent hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg px-5 py-2.5 transition-colors">
+          Conectar con Discord
+        </a>
+      </div>
+
+    {% elif not guild_id %}
+      <!-- Estado: logueado, sin servidor seleccionado -->
+      <div class="text-center mb-8">
+        <h2 class="text-2xl font-extrabold tracking-tight mb-2">Selecciona un servidor</h2>
+        <p class="text-muted text-sm">Elige el servidor de Discord donde está el bot para gestionarlo.</p>
+      </div>
+
+      {% if guilds %}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {% for g in guilds %}
+            <a href="{{ url_for('select_guild', guild_id=g.id) }}"
+               class="glass border border-border rounded-xl p-4 flex items-center gap-3 hover:border-accent/50 transition-colors">
+              {% if g.icon %}
+                <img src="https://cdn.discordapp.com/icons/{{ g.id }}/{{ g.icon }}.png" class="w-10 h-10 rounded-full">
+              {% else %}
+                <div class="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center text-sm font-bold">
+                  {{ g.name[:2]|upper }}
+                </div>
+              {% endif %}
+              <span class="text-sm font-semibold text-white">{{ g.name }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="glass border border-border rounded-2xl p-8 text-center text-sm text-muted">
+          No se encontraron servidores donde tengas permisos de administrador.
+        </div>
+      {% endif %}
+
+    {% else %}
+      <!-- Estado: servidor seleccionado -->
+      <div class="flex items-center justify-between mb-8">
+        <div>
+          <h2 class="text-3xl font-extrabold tracking-tight mb-1">Módulos</h2>
+          <p class="text-muted text-sm">Gestiona y configura las funciones de tu bot.</p>
+        </div>
+        <a href="{{ url_for('change_guild') }}"
+           class="text-xs text-muted hover:text-slate-100 border border-border rounded-lg px-3 py-2">
+          Cambiar servidor
+        </a>
+      </div>
+
+      <!-- Tarjetas de módulos -->
+      <form data-autosave action="{{ url_for('save_modules') }}" method="POST"
+            class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        {{ module_card(tickets_module, config.modules.tickets, "modules_tickets", url_for('tickets_config'), "🎫", allowed=config.allowed_modules.tickets) }}
+        {{ module_card(moderation_module, config.modules.moderation, "modules_moderation", url_for('moderation_config'), "🛡️", allowed=config.allowed_modules.moderation) }}
+        {{ module_card(youtube_module, config.modules.youtube, "modules_youtube", url_for('youtube_config'), "▶️", allowed=config.allowed_modules.youtube) }}
+        {{ module_card(twitch_module, config.modules.twitch, "modules_twitch", url_for('twitch_config'), "🟣", allowed=config.allowed_modules.twitch) }}
+        {{ module_card(wick_security_module, config.modules.wick_security, "modules_wick_security", url_for('wick_security_config'), "🛡️", allowed=config.allowed_modules.wick_security) }}
+      </form>
+
+      <!-- Próximamente -->
+      <div class="mt-10 text-center border border-dashed border-border rounded-2xl px-6 py-8">
+        <p class="text-sm font-semibold text-slate-300 mb-1">✨ Más módulos próximamente</p>
+        <p class="text-xs text-muted">Niveles, Roles automáticos y más están en camino.</p>
+      </div>
+    {% endif %}
+  </main>
+
+  <!-- Barra flotante de cambios sin guardar -->
+  <div id="unsaved-bar">
+    <span class="unsaved-text">⚠️ Tienes cambios sin guardar en esta sección</span>
+    <div class="unsaved-actions">
+      <button type="button" id="unsaved-cancel-btn" class="btn-discard-bar">Cancelar</button>
+      <button type="button" id="unsaved-save-btn" class="btn-save-bar">Guardar cambios</button>
+    </div>
+  </div>
+
+  <!-- Modal de bloqueo de navegación -->
+  <div id="nav-guard-modal">
+    <div class="modal-box">
+      <h3>Tienes cambios sin guardar</h3>
+      <p>¿Quieres guardarlos antes de salir? Si continúas sin guardar, perderás los cambios realizados en esta sección.</p>
+      <div class="modal-actions">
+        <button type="button" id="nav-guard-save" class="btn-modal-primary">Guardar</button>
+        <button type="button" id="nav-guard-discard" class="btn-modal-danger">Descartar y salir</button>
+        <button type="button" id="nav-guard-stay" class="btn-modal-ghost">Permanecer aquí</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ------------------------------------------------------------------
+    // Switches de módulos completos (Tickets, Moderación): el clic solo
+    // cambia el estado visual y el input oculto del formulario -- NO
+    // guarda al instante. El guardado real ocurre al pulsar "Guardar
+    // cambios" en la barra flotante, junto con el resto de cambios.
+    // ------------------------------------------------------------------
+    document.querySelectorAll(".module-toggle").forEach((toggle) => {
+      const wrap = toggle.closest(".module-toggle-wrap");
+      const hiddenInput = wrap.querySelector(".module-state-input");
+
+      toggle.addEventListener("click", () => {
+        const enabled = !toggle.classList.contains("on");
+        toggle.classList.toggle("on", enabled);
+        hiddenInput.value = enabled ? "true" : "false";
+        // Evento burbujeante: lo recoge el gestor global de cambios sin guardar.
+        hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+
+    // Mantiene el switch visual sincronizado con su input oculto (se usa
+    // también cuando el gestor de cambios sin guardar restaura un snapshot).
+    document.querySelectorAll(".module-state-input").forEach((input) => {
+      input.addEventListener("change", () => {
+        const wrap = input.closest(".module-toggle-wrap");
+        const toggle = wrap.querySelector(".module-toggle");
+        toggle.classList.toggle("on", input.value === "true");
+      });
+    });
+
+    // ------------------------------------------------------------------
+    // Gestor global de cambios sin guardar (estilo Discord / Shopify):
+    // detecta cambios en cualquier form[data-autosave] -- incluidos los
+    // switches de módulos completos -- muestra la barra flotante, permite
+    // guardar todo vía AJAX o descartar/restaurar, y bloquea la
+    // navegación (interna y cierre de pestaña) si hay cambios.
+    // ------------------------------------------------------------------
+    (function unsavedChangesManager() {
+      const forms = Array.from(document.querySelectorAll("form[data-autosave]"));
+      if (!forms.length) return;
+
+      const bar = document.getElementById("unsaved-bar");
+      const saveBtn = document.getElementById("unsaved-save-btn");
+      const cancelBtn = document.getElementById("unsaved-cancel-btn");
+      const modal = document.getElementById("nav-guard-modal");
+      const modalSave = document.getElementById("nav-guard-save");
+      const modalDiscard = document.getElementById("nav-guard-discard");
+      const modalStay = document.getElementById("nav-guard-stay");
+
+      let isDirty = false;
+      let isRestoring = false;
+      let pendingHref = null;
+      const snapshots = new Map();
+
+      function captureSnapshot(form) {
+        snapshots.set(form, new FormData(form));
+      }
+      forms.forEach(captureSnapshot);
+
+      // Evita que el envío nativo del form recargue la página: el guardado
+      // se hace siempre a través de la barra flotante (AJAX).
+      forms.forEach((form) => {
+        form.addEventListener("submit", (e) => e.preventDefault());
+      });
+
+      function setDirty(state) {
+        isDirty = state;
+        bar.classList.toggle("show", isDirty);
+      }
+
+      function markDirty() {
+        if (isRestoring) return;
+        setDirty(true);
+      }
+
+      forms.forEach((form) => {
+        form.addEventListener("input", markDirty);
+        form.addEventListener("change", markDirty);
+      });
+
+      function restoreSnapshot(form) {
+        const data = snapshots.get(form);
+        if (!data) return;
+        isRestoring = true;
+
+        form.querySelectorAll("input, select, textarea").forEach((el) => {
+          if (!el.name) return;
+          if (el.type === "checkbox") {
+            el.checked = data.has(el.name);
+          } else {
+            el.value = data.has(el.name) ? data.get(el.name) : "";
+          }
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        isRestoring = false;
+      }
+
+      function setBarSaving(saving) {
+        saveBtn.disabled = saving;
+        saveBtn.innerHTML = saving
+          ? '<span class="spinner"></span> Guardando…'
+          : "Guardar cambios";
+      }
+
+      async function saveAllForms() {
+        setBarSaving(true);
+        try {
+          await Promise.all(
+            forms.map((form) => {
+              const data = new FormData(form);
+              return fetch(form.action, { method: "POST", body: data }).then((res) => {
+                if (!res.ok) throw new Error("save failed: " + form.action);
+                return res;
+              });
+            })
+          );
+          forms.forEach(captureSnapshot);
+          setDirty(false);
+          return true;
+        } catch (err) {
+          alert("Ocurrió un error al guardar los cambios. Inténtalo de nuevo.");
+          return false;
+        } finally {
+          setBarSaving(false);
+        }
+      }
+
+      saveBtn.addEventListener("click", () => { saveAllForms(); });
+
+      cancelBtn.addEventListener("click", () => {
+        forms.forEach(restoreSnapshot);
+        setDirty(false);
+      });
+
+      // Bloqueo de navegación interna (enlaces del menú/sidebar/tarjetas)
+      document.addEventListener("click", (e) => {
+        const link = e.target.closest("a[href]");
+        if (!link) return;
+        if (link.target === "_blank") return;
+        if (link.href.startsWith("javascript:")) return;
+        if (!isDirty) return;
+        e.preventDefault();
+        pendingHref = link.href;
+        modal.classList.add("show");
+      });
+
+      modalStay.addEventListener("click", () => {
+        modal.classList.remove("show");
+        pendingHref = null;
+      });
+
+      modalDiscard.addEventListener("click", () => {
+        modal.classList.remove("show");
+        const href = pendingHref;
+        pendingHref = null;
+        setDirty(false);
+        if (href) window.location.href = href;
+      });
+
+      modalSave.addEventListener("click", async () => {
+        const ok = await saveAllForms();
+        if (ok) {
+          modal.classList.remove("show");
+          if (pendingHref) {
+            const href = pendingHref;
+            pendingHref = null;
+            window.location.href = href;
+          }
+        }
+      });
+
+      // Bloqueo de cierre/recarga de pestaña
+      window.addEventListener("beforeunload", (e) => {
+        if (!isDirty) return;
+        e.preventDefault();
+        e.returnValue = "";
+      });
+    })();
+  </script>
+</body>
+</html>
