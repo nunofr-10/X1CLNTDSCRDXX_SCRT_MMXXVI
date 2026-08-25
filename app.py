@@ -176,6 +176,70 @@ def decrypt_secret(value):
         return value
 
 
+# ------------------------------------------------------------------
+# Registro central de campos sensibles (modelo multi-tenant, extensible)
+# ------------------------------------------------------------------
+# Cada bot/cliente guarda sus propias credenciales de forma AISLADA en su
+# propio documento de config_collection (indexado por bot_id) -- nada de
+# esto se comparte entre clientes. Esta lista es solo el CATÁLOGO de qué
+# rutas (notación de punto) dentro de ese documento son sensibles y deben
+# viajar cifradas con Fernet.
+#
+# Para añadir un nuevo campo sensible en el futuro (otra integración, una
+# API key nueva, un secreto de pago, etc.):
+#   1. Añade su ruta aquí.
+#   2. Llama a encrypt_secret(valor) en la ruta Flask donde se guarda.
+# decrypt_sensitive_fields() ya se encarga de descifrarlo automáticamente
+# en CADA get_config() -- no hace falta tocar get_config() de nuevo.
+SENSITIVE_CONFIG_PATHS = [
+    "bot_token",                            # Token del bot de Discord del cliente
+    "twitch.credentials.client_secret",     # Client Secret de la app de Twitch del cliente
+]
+
+
+def _get_by_path(d, path):
+    """Lee un valor anidado de un dict a partir de una ruta 'a.b.c'.
+    Devuelve None si cualquier tramo del camino no existe o no es un dict."""
+    parts = path.split(".")
+    cur = d
+    for p in parts:
+        if not isinstance(cur, dict) or p not in cur:
+            return None
+        cur = cur[p]
+    return cur
+
+
+def _set_by_path(d, path, value):
+    """Escribe un valor anidado en un dict a partir de una ruta 'a.b.c',
+    creando los sub-diccionarios intermedios que falten."""
+    parts = path.split(".")
+    cur = d
+    for p in parts[:-1]:
+        nxt = cur.get(p)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[p] = nxt
+        cur = nxt
+    cur[parts[-1]] = value
+
+
+def decrypt_sensitive_fields(config):
+    """
+    Descifra, in-place, TODOS los campos registrados en
+    SENSITIVE_CONFIG_PATHS que estén presentes en `config` (el documento de
+    un bot/cliente concreto, ya fusionado con sus defaults). Se llama una
+    única vez al final de get_config() -- así cada campo sensible nuevo que
+    se añada al registro se descifra automáticamente para TODO el código
+    que llama a get_config(), sin tener que acordarse de tocarlo aquí cada
+    vez.
+    """
+    for path in SENSITIVE_CONFIG_PATHS:
+        value = _get_by_path(config, path)
+        if value:
+            _set_by_path(config, path, decrypt_secret(value))
+    return config
+
+
 def mongo_ready():
     """True si la conexión a MongoDB se inicializó correctamente al arrancar
     la app. Úsalo antes de cualquier operación sobre config_collection /
@@ -317,12 +381,24 @@ DEFAULT_TWITCH_LIVE = {
     "mensaje": "🔴 ¡{author} está en directo! {title} - {url}",
 }
 
+# Credenciales de la app de Twitch del propio cliente (Twitch Developer
+# Console). Cada bot/cliente puede usar su propia app de Twitch en vez de
+# depender de una app global compartida -- aislamiento total, como con
+# bot_token. "client_secret" viaja cifrado con Fernet (ver
+# SENSITIVE_CONFIG_PATHS); "client_id" no es secreto (es análogo a
+# discord_user_id/client_id de Discord) y se guarda tal cual.
+DEFAULT_TWITCH_CREDENTIALS = {
+    "client_id": "",
+    "client_secret": "",
+}
+
 DEFAULT_TWITCH_CONFIG = {
     # IDs de directos ya notificados, para que el bot no repita el aviso.
     # Es estado gestionado por el bot, no por el dashboard: al guardar
     # desde la web (save_twitch) nunca se sobrescribe este campo.
     "notified_ids": [],
     "live": dict(DEFAULT_TWITCH_LIVE),
+    "credentials": dict(DEFAULT_TWITCH_CREDENTIALS),
 }
 
 # ------------------------------------------------------------------
@@ -724,14 +800,20 @@ def get_config():
         "streams": {**DEFAULT_YOUTUBE_STREAMS, **_dict_field(stored_youtube, "streams")},
     }
 
-    # Merge profundo del módulo de Twitch: "live" conserva sus defaults campo
-    # a campo; "notified_ids" es estado gestionado por el bot y se conserva
-    # tal cual esté guardado (nunca se resetea aquí).
+    # Merge profundo del módulo de Twitch: "live" y "credentials" conservan
+    # sus defaults campo a campo; "notified_ids" es estado gestionado por el
+    # bot y se conserva tal cual esté guardado (nunca se resetea aquí).
+    # "credentials.client_secret" todavía está cifrado en este punto -- se
+    # descifra más abajo junto al resto de SENSITIVE_CONFIG_PATHS.
     stored_twitch = _dict_field(config, "twitch")
     twitch_notified_ids = stored_twitch.get("notified_ids")
     merged["twitch"] = {
         "notified_ids": list(twitch_notified_ids) if isinstance(twitch_notified_ids, list) else [],
         "live": {**DEFAULT_TWITCH_LIVE, **_dict_field(stored_twitch, "live")},
+        "credentials": {
+            **DEFAULT_TWITCH_CREDENTIALS,
+            **_dict_field(stored_twitch, "credentials"),
+        },
     }
 
     # ----------------------------------------------------------------
@@ -785,11 +867,14 @@ def get_config():
         )
         merged[config_key]["enabled"] = merged["modules"][module_key]
 
-    # Descifra el token del bot justo antes de devolverlo -- así el resto
-    # del código (active_bot_token(), discord_get(), etc.) sigue recibiendo
-    # el token en texto plano listo para usar, sin tener que llamar a
-    # decrypt_secret() en cada punto donde se lee config["bot_token"].
-    merged["bot_token"] = decrypt_secret(merged.get("bot_token", ""))
+    # Descifra TODOS los campos sensibles registrados en
+    # SENSITIVE_CONFIG_PATHS (bot_token, twitch.credentials.client_secret,
+    # y cualquiera que se añada en el futuro) justo antes de devolver la
+    # config -- así el resto del código (active_bot_token(), la llamada a
+    # la API de Twitch, etc.) sigue recibiendo los valores en texto plano
+    # listos para usar, para ESTE bot/cliente exclusivamente, sin mezclarse
+    # con los de ningún otro.
+    decrypt_sensitive_fields(merged)
 
     return merged
 
@@ -1781,18 +1866,25 @@ def twitch_config():
 @requires_module("twitch")
 def save_twitch():
     """
-    Guarda la sección "live" usando notación de punto (twitch.live) para NO
-    tocar twitch.notified_ids -- ese campo es estado gestionado por el bot
-    (directos ya notificados) y debe sobrevivir a cualquier guardado desde
-    el dashboard.
+    Guarda "live" y "credentials" usando notación de punto (twitch.live /
+    twitch.credentials) para NO tocar twitch.notified_ids -- ese campo es
+    estado gestionado por el bot (directos ya notificados) y debe
+    sobrevivir a cualquier guardado desde el dashboard.
 
     "channel" se guarda TAL CUAL lo escribe el usuario (URL completa o
     nombre de usuario) -- solo se le quita espacios en blanco. No se parsea
     ni se valida el formato aquí: es el bot (cogs/twitch.py) quien debe
     normalizar el valor y extraer el nombre de canal real antes de
     consultar la API de Twitch.
+
+    "client_secret" es la credencial sensible de la app de Twitch de ESTE
+    cliente: se cifra con encrypt_secret() antes de guardarla (ver
+    SENSITIVE_CONFIG_PATHS). El campo del formulario llega vacío si el
+    usuario no ha tocado el campo de contraseña -- en ese caso se conserva
+    el secreto que ya hubiera guardado, en vez de borrarlo.
     """
     form = request.form
+    config = safe_get_config()
 
     live = {
         "enabled": "live_enabled" in form,
@@ -1802,8 +1894,15 @@ def save_twitch():
         "mensaje": form.get("live_mensaje", "").strip(),
     }
 
+    new_client_secret = form.get("twitch_client_secret", "").strip()
+    current_client_secret = config.get("twitch", {}).get("credentials", {}).get("client_secret", "")
+    credentials = {
+        "client_id": form.get("twitch_client_id", "").strip(),
+        "client_secret": encrypt_secret(new_client_secret or current_client_secret),
+    }
+
     try:
-        save_fields({"twitch.live": live})
+        save_fields({"twitch.live": live, "twitch.credentials": credentials})
         flash("Configuración de Twitch guardada correctamente.", "success")
     except PyMongoError as e:
         flash(f"Error al guardar en MongoDB: {e}", "error")
