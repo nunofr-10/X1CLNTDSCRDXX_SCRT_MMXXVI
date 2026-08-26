@@ -2229,14 +2229,17 @@ def handle_twitch_eventsub_notification(sub_type, event):
 
 
 @app.route("/twitch/oauth/login")
-@requires_module("twitch")
+@requires_module("twitch_logs")
 def twitch_oauth_login():
     """
     Paso 1 de la vinculación de la cuenta de Twitch del cliente: lo manda a
     autorizar en Twitch los scopes necesarios para las 3 suscripciones
-    EventSub de sanciones. Requiere que el cliente ya haya guardado el
-    Client ID de su propia app de Twitch en esta página (/twitch) --
-    exactamente igual que Discord: el login autentica, nunca crea ni
+    EventSub de sanciones. Es una acción del módulo "Logs Twitch"
+    (twitch_logs), NO del módulo "Twitch" de directos -- por eso exige la
+    licencia de twitch_logs, aunque el Client ID/Secret que usa se
+    configure en la página de Twitch (infraestructura técnica compartida,
+    no licencia). Requiere que el cliente ya haya guardado ese Client ID
+    -- exactamente igual que Discord: el login autentica, nunca crea ni
     vincula nada por sí solo hasta que el cliente confirma en la pantalla
     de autorización de Twitch.
     """
@@ -2263,7 +2266,7 @@ def twitch_oauth_login():
 
 
 @app.route("/twitch/oauth/callback")
-@requires_module("twitch")
+@requires_module("twitch_logs")
 def twitch_oauth_callback():
     """
     Paso 2: Twitch redirige aquí con un "code" tras la autorización del
