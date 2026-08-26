@@ -2216,10 +2216,10 @@ def twitch_oauth_login():
     client_id = config.get("twitch", {}).get("credentials", {}).get("client_id", "")
     if not client_id:
         flash(
-            "Configura primero el Client ID de tu app de Twitch más abajo antes de vincular la cuenta.",
+            "Configura primero el Client ID de tu app de Twitch en la página de Twitch antes de vincular la cuenta.",
             "error",
         )
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     state = secrets.token_urlsafe(16)
     session["twitch_oauth_state"] = state
@@ -2249,11 +2249,11 @@ def twitch_oauth_callback():
 
     if error:
         flash(f"Twitch denegó la autorización: {error}", "error")
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     if not code or state != session.get("twitch_oauth_state"):
         flash("No se pudo completar la vinculación con Twitch.", "error")
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
     session.pop("twitch_oauth_state", None)
 
     config = safe_get_config()
@@ -2262,10 +2262,10 @@ def twitch_oauth_callback():
     client_secret = credentials.get("client_secret", "")
     if not client_id or not client_secret:
         flash(
-            "Configura primero el Client ID y Client Secret de tu app de Twitch en esta página.",
+            "Configura primero el Client ID y Client Secret de tu app de Twitch en la página de Twitch.",
             "error",
         )
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     try:
         token_resp = requests.post(
@@ -2285,7 +2285,7 @@ def twitch_oauth_callback():
         refresh_token = token_data.get("refresh_token", "")
     except (requests.RequestException, ValueError, KeyError) as e:
         flash(f"No se pudo intercambiar el código de Twitch por un token: {e}", "error")
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     try:
         users_resp = requests.get(
@@ -2298,11 +2298,11 @@ def twitch_oauth_callback():
         broadcaster_id = users_data[0]["id"] if users_data else ""
     except (requests.RequestException, ValueError, KeyError, IndexError) as e:
         flash(f"No se pudo obtener tu ID de canal de Twitch: {e}", "error")
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     if not broadcaster_id:
         flash("Twitch no devolvió un ID de canal válido.", "error")
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     try:
         save_fields(
@@ -2314,14 +2314,14 @@ def twitch_oauth_callback():
         )
     except PyMongoError as e:
         flash(f"No se pudo guardar la vinculación con Twitch: {e}", "error")
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     config = safe_get_config()  # recarga ya con broadcaster_id/credenciales frescas
     try:
         _, errors = ensure_twitch_eventsub_subscriptions(config, broadcaster_id)
     except ValueError as e:
         flash(f"Cuenta de Twitch vinculada, pero no se pudieron activar los avisos: {e}", "error")
-        return redirect(url_for("twitch_config"))
+        return redirect(url_for("twitch_logs_config"))
 
     if errors:
         flash(
@@ -2332,7 +2332,7 @@ def twitch_oauth_callback():
     else:
         flash("✅ Cuenta de Twitch vinculada y logs de sanciones activados.", "success")
 
-    return redirect(url_for("twitch_config"))
+    return redirect(url_for("twitch_logs_config"))
 
 
 @app.route("/webhooks/twitch/eventsub", methods=["POST"])
@@ -2484,10 +2484,64 @@ def save_twitch():
         "client_secret": encrypt_secret(new_client_secret or current_client_secret),
     }
 
-    # Logs de sanciones: canal de Discord + toggles por tipo de sanción.
-    # No tocan broadcaster_id/access_token/refresh_token/subscription_ids
-    # -- esos los gestiona exclusivamente el flujo OAuth
-    # (twitch_oauth_login/twitch_oauth_callback), nunca este formulario.
+    try:
+        save_fields({"twitch.live": live, "twitch.credentials": credentials})
+        flash("Configuración de Twitch guardada correctamente.", "success")
+    except PyMongoError as e:
+        flash(f"Error al guardar en MongoDB: {e}", "error")
+
+    return redirect(url_for("twitch_config"))
+
+
+# ------------------------------------------------------------------
+# Vista de configuración de los Logs de sanciones de Twitch (EventSub) --
+# página separada de /twitch a propósito: son dos módulos de UI
+# independientes (directos vs. sanciones) que comparten únicamente las
+# credenciales de la app de Twitch del cliente (twitch.credentials).
+# ------------------------------------------------------------------
+@app.route("/twitch/logs")
+@requires_module("twitch")
+def twitch_logs_config():
+    guild_id = current_guild_id()
+    if not guild_id:
+        flash("Selecciona un servidor antes de continuar.", "error")
+        return redirect(url_for("index"))
+
+    try:
+        config = safe_get_config()
+        bot_token = active_bot_token(config)
+        channels = fetch_guild_channels(guild_id, bot_token, types=(0, 5))
+
+        if not channels:
+            flash(
+                "No se pudieron cargar los canales de ese servidor. "
+                "Verifica que el bot esté invitado y tenga permisos.",
+                "error",
+            )
+
+        return render_template(
+            "logtwitch.html",
+            config=config,
+            channels=channels,
+            guild_id=guild_id,
+            user=current_user(),
+        )
+    except Exception as e:
+        flash(f"No se pudo cargar la configuración de Logs de Twitch: {e}", "error")
+        return redirect(url_for("index"))
+
+
+@app.route("/twitch/logs/save", methods=["POST"])
+@requires_module("twitch")
+def save_twitch_logs():
+    """
+    Guarda el canal de Discord y los toggles de filtro de los logs de
+    sanciones. NUNCA toca broadcaster_id/access_token/refresh_token/
+    subscription_ids -- esos los gestiona exclusivamente el flujo OAuth
+    (twitch_oauth_login/twitch_oauth_callback), nunca este formulario.
+    """
+    form = request.form
+
     log_channel_id = form.get("twitch_log_channel_id", "").strip()
     filters = {
         "ban": "twitch_filter_ban" in form,
@@ -2497,19 +2551,12 @@ def save_twitch():
     }
 
     try:
-        save_fields(
-            {
-                "twitch.live": live,
-                "twitch.credentials": credentials,
-                "twitch.log_channel_id": log_channel_id,
-                "twitch.filters": filters,
-            }
-        )
-        flash("Configuración de Twitch guardada correctamente.", "success")
+        save_fields({"twitch.log_channel_id": log_channel_id, "twitch.filters": filters})
+        flash("Configuración de logs de Twitch guardada correctamente.", "success")
     except PyMongoError as e:
         flash(f"Error al guardar en MongoDB: {e}", "error")
 
-    return redirect(url_for("twitch_config"))
+    return redirect(url_for("twitch_logs_config"))
 
 
 # ------------------------------------------------------------------
