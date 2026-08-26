@@ -1253,7 +1253,8 @@ def index():
     """
     user = current_user()
     if user and not is_admin() and not current_bot_id():
-        return render_template("no_access.html", user=user)
+        blocked = is_user_blocked(str(user.get("id", "")))
+        return render_template("no_access.html", user=user, blocked=blocked)
 
     try:
         config = safe_get_config()
@@ -1288,13 +1289,21 @@ def index():
 @app.route("/no-access")
 def no_access():
     """
-    Página mostrada a un cliente logueado que todavía no tiene ningún bot
-    asignado (no existe en users_collection, o su bot_id no resolvió a
-    ningún documento). Es el destino de url_for("no_access") usado por los
-    decoradores requires_login/requires_module cuando current_bot_id() es
-    None.
+    Página mostrada a un cliente logueado que todavía no tiene acceso a
+    ningún panel de bot. Es el destino de url_for("no_access") usado por
+    los decoradores requires_login/requires_module cuando current_bot_id()
+    es None.
+
+    IMPORTANTE: "sin bot asignado todavía" y "bloqueado por el admin" son
+    dos situaciones muy distintas para el cliente -- el login con Discord
+    se completó correctamente en ambos casos, así que el mensaje no debe
+    sonar a que el inicio de sesión falló o a que hace falta "vincular un
+    bot" para poder entrar. Se calcula aquí el motivo exacto para que la
+    plantilla pueda mostrar el texto correcto en cada caso.
     """
-    return render_template("no_access.html", user=current_user())
+    user = current_user()
+    blocked = bool(user) and is_user_blocked(str(user.get("id", "")))
+    return render_template("no_access.html", user=user, blocked=blocked)
 
 
 @app.route("/api/modules/save", methods=["POST"])
@@ -2266,6 +2275,37 @@ def admin_update_license(bot_id):
             flash("Ese bot no existe.", "error")
         else:
             flash("Licencia de módulos actualizada correctamente.", "success")
+    except Exception as e:
+        flash(f"Error al guardar en MongoDB: {e}", "error")
+
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/bots/<bot_id>/rename", methods=["POST"])
+@requires_admin
+def admin_update_bot_name(bot_id):
+    """
+    Renombra un bot ya creado (bot_name en config_collection). bot_name solo
+    se pedía hasta ahora en el formulario de creación -- esta ruta permite
+    corregirlo después sin tener que borrar y recrear el bot, por ejemplo
+    para quitar nombres de prueba ("pruebaaa bot") que quedaron guardados
+    de pruebas antiguas y que se muestran tal cual en el home del cliente
+    (modules.html usa {{ config.bot_name }}).
+    """
+    if not mongo_ready():
+        flash("La conexión a MongoDB no está disponible en este momento.", "error")
+        return redirect(url_for("admin_panel"))
+
+    new_name = request.form.get("bot_name", "").strip()
+
+    try:
+        result = config_collection.update_one(
+            {"_id": bot_id}, {"$set": {"bot_name": new_name}}
+        )
+        if result.matched_count == 0:
+            flash("Ese bot no existe.", "error")
+        else:
+            flash("Nombre del bot actualizado correctamente.", "success")
     except Exception as e:
         flash(f"Error al guardar en MongoDB: {e}", "error")
 
