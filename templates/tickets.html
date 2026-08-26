@@ -440,8 +440,9 @@
       <h1 class="text-xl font-bold text-white">Tickets</h1>
     </div>
     <div class="flex items-center gap-6 text-sm text-muted">
-      <span>ES ES</span>
-      <span class="text-slate-200">@nunooo_</span>
+      {% if user %}
+        <span>Conectado como <span class="text-slate-200 font-medium">{{ user.username }}</span></span>
+      {% endif %}
     </div>
   </header>
 

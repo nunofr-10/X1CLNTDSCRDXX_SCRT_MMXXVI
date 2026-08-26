@@ -229,7 +229,7 @@
   <header class="flex items-center justify-between px-8 py-5 border-b border-border">
     <div class="flex items-center gap-3">
       <div class="w-10 h-10 rounded-full bg-gradient-to-br from-accent to-indigo-800"></div>
-      <h1 class="text-lg font-bold">pruebaaa bot</h1>
+      <h1 class="text-lg font-bold">{{ config.bot_name or "Dashboard" }}</h1>
     </div>
     <div class="flex items-center gap-4 text-sm text-muted">
       {% if user %}
