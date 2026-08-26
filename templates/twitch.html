@@ -232,6 +232,11 @@
       </div>
     {% endif %}
 
+    <div class="rounded-lg px-4 py-3 text-sm border border-border bg-card flex items-center justify-between gap-4 flex-wrap">
+      <span>🚨 ¿Buscas los avisos de baneos, timeouts, advertencias y mensajes borrados?</span>
+      <a href="{{ url_for('twitch_logs_config') }}" class="text-xs font-semibold text-accent hover:underline whitespace-nowrap">Ir a Logs de Twitch →</a>
+    </div>
+
     <!-- En Directo -->
     <section class="bg-card border border-border rounded-xl p-6">
       <h2 class="text-lg font-bold text-white mb-1">🔴 Notificaciones de Directo</h2>
