@@ -1,5 +1,8 @@
 import os
 import secrets
+import hmac
+import hashlib
+import json
 from functools import wraps
 from urllib.parse import urlencode
 
@@ -100,6 +103,16 @@ try:
     # Colección multi-tenant: mapea el ID de Discord de cada cliente al bot_id
     # que tiene contratado, ej. {"_id": "<discord_user_id>", "bot_id": "<bot_id>"}.
     users_collection = db["users"]
+    # El webhook de EventSub de Twitch (/webhooks/twitch/eventsub) recibe
+    # eventos sin sesión Flask y necesita encontrar, por cada notificación,
+    # qué bot/cliente es dueño de ese canal de Twitch -- este índice hace
+    # esa búsqueda (find_one({"twitch.broadcaster_id": ...})) rápida incluso
+    # con muchos clientes. sparse=True porque la mayoría de documentos
+    # todavía no tendrán este campo (clientes que no usan logs de sanciones).
+    try:
+        config_collection.create_index("twitch.broadcaster_id", sparse=True)
+    except Exception as e:
+        print(f"[WARN] No se pudo crear el índice twitch.broadcaster_id: {e}")
 except Exception as e:
     mongo_init_error = str(e)
     print(f"[WARN] No se pudo inicializar la conexión a MongoDB al arrancar: {e}")
@@ -194,6 +207,8 @@ def decrypt_secret(value):
 SENSITIVE_CONFIG_PATHS = [
     "bot_token",                            # Token del bot de Discord del cliente
     "twitch.credentials.client_secret",     # Client Secret de la app de Twitch del cliente
+    "twitch.access_token",                  # OAuth access_token del streamer (logs de sanciones)
+    "twitch.refresh_token",                 # OAuth refresh_token del streamer (logs de sanciones)
 ]
 
 
@@ -290,6 +305,64 @@ DISCORD_REDIRECT_URI = os.environ.get("DISCORD_REDIRECT_URI", "http://localhost:
 DISCORD_API = "https://discord.com/api"
 PERM_ADMINISTRATOR = 0x8
 PERM_MANAGE_GUILD = 0x20
+
+# ------------------------------------------------------------------
+# Logs de sanciones de Twitch en tiempo real (EventSub). Variables de
+# entorno GLOBALES de la plataforma (una sola vez, no por cliente):
+#   TWITCH_OAUTH_REDIRECT_URI  -> URL de callback de /twitch/oauth/callback,
+#                                  ej. https://tu-dashboard.com/twitch/oauth/callback.
+#                                  Se registra en el campo "OAuth Redirect URLs"
+#                                  de la app de Twitch de CADA cliente (todas
+#                                  pueden compartir la misma URL fija).
+#   TWITCH_EVENTSUB_CALLBACK_URL -> URL pública donde Twitch envía las
+#                                  notificaciones de sanciones, ej.
+#                                  https://tu-dashboard.com/webhooks/twitch/eventsub.
+#                                  Debe ser HTTPS y accesible desde internet
+#                                  (Twitch la verifica con un "challenge" al
+#                                  crear cada suscripción).
+#   TWITCH_EVENTSUB_SECRET     -> secreto compartido para firmar/verificar
+#                                  los webhooks (HMAC-SHA256). Genera uno
+#                                  aleatorio largo (ej. `openssl rand -hex 32`)
+#                                  y NO lo publiques -- es el mismo para
+#                                  todos los clientes, ya que cada evento ya
+#                                  se identifica y aísla por broadcaster_id.
+#
+# Cada CLIENTE, además, usa su propio Client ID/Secret de Twitch (guardados
+# cifrados en twitch.credentials, ver DEFAULT_TWITCH_CREDENTIALS) -- esas NO
+# son variables de entorno globales, se configuran desde /twitch en el panel.
+# ------------------------------------------------------------------
+TWITCH_OAUTH_REDIRECT_URI = os.environ.get(
+    "TWITCH_OAUTH_REDIRECT_URI", "http://localhost:5000/twitch/oauth/callback"
+)
+TWITCH_EVENTSUB_CALLBACK_URL = os.environ.get(
+    "TWITCH_EVENTSUB_CALLBACK_URL", "http://localhost:5000/webhooks/twitch/eventsub"
+)
+TWITCH_EVENTSUB_SECRET = os.environ.get("TWITCH_EVENTSUB_SECRET")
+
+TWITCH_AUTH_API = "https://id.twitch.tv/oauth2"
+TWITCH_HELIX_API = "https://api.twitch.tv/helix"
+
+# Scopes que el streamer debe autorizar para que la plataforma pueda crear
+# las 3 suscripciones EventSub de sanciones (ban/timeout, advertencias,
+# mensajes borrados). Si Twitch cambia estos requisitos en el futuro,
+# revisa https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/
+# antes de tocar esta lista.
+TWITCH_OAUTH_SCOPES = [
+    "channel:moderate",          # channel.ban (bans y timeouts)
+    "moderator:manage:warnings", # channel.warning.send (advertencias)
+    "user:read:chat",            # channel.chat.message_delete (borrados)
+    "channel:bot",               # channel.chat.message_delete (lado broadcaster)
+]
+
+# Tipos de suscripción EventSub que crea /twitch/oauth/callback, y a qué
+# filtro de config.twitch.filters corresponde cada uno. "delete_message" y
+# "warning"/"ban"/"timeout" se resuelven en el propio payload del evento
+# (ver handle_twitch_eventsub_notification()).
+TWITCH_EVENTSUB_SUBSCRIPTIONS = [
+    {"type": "channel.ban", "version": "1"},
+    {"type": "channel.warning.send", "version": "1"},
+    {"type": "channel.chat.message_delete", "version": "1"},
+]
 
 # Valores permitidos para el tipo de mensaje del panel de tickets
 MESSAGE_TYPES = {
@@ -392,6 +465,32 @@ DEFAULT_TWITCH_CREDENTIALS = {
     "client_secret": "",
 }
 
+# ------------------------------------------------------------------
+# Logs de sanciones de Twitch en tiempo real (EventSub) -- campos fijos
+# dentro del propio documento "twitch" del cliente, aislados igual que el
+# resto del módulo:
+#   - broadcaster_id: ID numérico del canal de Twitch del cliente (lo
+#     devuelve la API de Twitch al vincular la cuenta, GET /helix/users).
+#   - access_token/refresh_token: tokens OAuth del propio streamer,
+#     obtenidos en /twitch/oauth/callback. Viajan cifrados con Fernet
+#     (ver SENSITIVE_CONFIG_PATHS) -- se usan para demostrar ante Twitch
+#     que el streamer autorizó los scopes de moderación; las suscripciones
+#     EventSub en sí se crean con un App Access Token (client credentials
+#     de twitch.credentials), no con estos tokens de usuario.
+#   - log_channel_id: canal de Discord del cliente donde se publican los
+#     avisos de sanciones.
+#   - filters: qué tipos de sanción quiere recibir este cliente. El
+#     webhook los consulta ANTES de enviar cualquier aviso a Discord.
+#   - subscription_ids: bookkeeping interno (ids de las suscripciones
+#     EventSub ya creadas en Twitch), para poder depurarlas/revisarlas
+#     sin tener que volver a listarlas desde la API cada vez.
+DEFAULT_TWITCH_FILTERS = {
+    "ban": True,
+    "timeout": True,
+    "warning": True,
+    "delete_message": True,
+}
+
 DEFAULT_TWITCH_CONFIG = {
     # IDs de directos ya notificados, para que el bot no repita el aviso.
     # Es estado gestionado por el bot, no por el dashboard: al guardar
@@ -399,6 +498,12 @@ DEFAULT_TWITCH_CONFIG = {
     "notified_ids": [],
     "live": dict(DEFAULT_TWITCH_LIVE),
     "credentials": dict(DEFAULT_TWITCH_CREDENTIALS),
+    "broadcaster_id": "",
+    "access_token": "",
+    "refresh_token": "",
+    "log_channel_id": "",
+    "filters": dict(DEFAULT_TWITCH_FILTERS),
+    "subscription_ids": {},
 }
 
 # ------------------------------------------------------------------
@@ -723,17 +828,26 @@ def active_bot_token(config):
     return config.get("bot_token") or DISCORD_BOT_TOKEN
 
 
-def get_config():
+def get_config(bot_id=None):
     """
-    Obtiene la configuración del bot/cliente activo de la sesión (bot_id =
-    current_bot_id()) desde MongoDB, rellenando defaults.
+    Obtiene la configuración de un bot/cliente desde MongoDB, rellenando
+    defaults.
 
-    Si no hay ningún bot activo en la sesión (usuario sin acceso, o no
-    logueado), devuelve DEFAULT_CONFIG tal cual -- las vistas que dependen de
-    un bot real deben comprobar current_bot_id() / current_user() antes de
-    fiarse de que esta config corresponde a un cliente de verdad.
+    Por defecto usa el bot/cliente activo de la sesión Flask actual
+    (bot_id = current_bot_id()) -- así el 99% de las llamadas existentes en
+    el dashboard no necesitan cambiar. Pasar `bot_id` explícitamente permite
+    leer la config de un cliente concreto SIN sesión Flask, que es lo que
+    necesita el webhook de EventSub de Twitch (/webhooks/twitch/eventsub):
+    Twitch nos llama directamente, sin cookie de sesión, así que el bot_id
+    se resuelve buscando en Mongo qué cliente tiene ese "twitch.broadcaster_id"
+    y se pasa aquí a mano.
+
+    Si no hay ningún bot activo/indicado, devuelve DEFAULT_CONFIG tal cual
+    -- las vistas que dependen de un bot real deben comprobar
+    current_bot_id() / current_user() antes de fiarse de que esta config
+    corresponde a un cliente de verdad.
     """
-    bot_id = current_bot_id()
+    bot_id = bot_id or current_bot_id()
     if not bot_id:
         return dict(DEFAULT_CONFIG)
 
@@ -807,6 +921,7 @@ def get_config():
     # descifra más abajo junto al resto de SENSITIVE_CONFIG_PATHS.
     stored_twitch = _dict_field(config, "twitch")
     twitch_notified_ids = stored_twitch.get("notified_ids")
+    stored_twitch_subscription_ids = stored_twitch.get("subscription_ids")
     merged["twitch"] = {
         "notified_ids": list(twitch_notified_ids) if isinstance(twitch_notified_ids, list) else [],
         "live": {**DEFAULT_TWITCH_LIVE, **_dict_field(stored_twitch, "live")},
@@ -814,6 +929,19 @@ def get_config():
             **DEFAULT_TWITCH_CREDENTIALS,
             **_dict_field(stored_twitch, "credentials"),
         },
+        # Logs de sanciones (EventSub). "access_token"/"refresh_token"
+        # todavía están cifrados en este punto -- se descifran más abajo
+        # junto al resto de SENSITIVE_CONFIG_PATHS.
+        "broadcaster_id": stored_twitch.get("broadcaster_id") or "",
+        "access_token": stored_twitch.get("access_token") or "",
+        "refresh_token": stored_twitch.get("refresh_token") or "",
+        "log_channel_id": stored_twitch.get("log_channel_id") or "",
+        "filters": {**DEFAULT_TWITCH_FILTERS, **_dict_field(stored_twitch, "filters")},
+        "subscription_ids": (
+            dict(stored_twitch_subscription_ids)
+            if isinstance(stored_twitch_subscription_ids, dict)
+            else {}
+        ),
     }
 
     # ----------------------------------------------------------------
@@ -1838,6 +1966,448 @@ def save_youtube():
 
 
 # ------------------------------------------------------------------
+# Logs de sanciones de Twitch en tiempo real (EventSub)
+# ------------------------------------------------------------------
+def get_twitch_app_access_token(client_id, client_secret):
+    """
+    App Access Token (client credentials grant) de la app de Twitch de UN
+    cliente concreto. Es el token con el que se crean las suscripciones
+    EventSub -- Twitch exige un App Access Token para el transporte
+    "webhook", nunca el token de usuario del streamer (ese solo demuestra
+    que el streamer autorizó los scopes necesarios).
+    """
+    resp = requests.post(
+        f"{TWITCH_AUTH_API}/token",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "client_credentials",
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+
+def _twitch_eventsub_condition(sub_type, broadcaster_id):
+    """
+    Condition exigido por cada tipo de suscripción (ver
+    https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/). El
+    streamer autoriza con su propia cuenta de Twitch, así que actúa a la
+    vez como broadcaster, moderador y usuario de chat en las tres.
+    """
+    if sub_type == "channel.ban":
+        return {"broadcaster_user_id": broadcaster_id}
+    if sub_type == "channel.warning.send":
+        return {"broadcaster_user_id": broadcaster_id, "moderator_user_id": broadcaster_id}
+    if sub_type == "channel.chat.message_delete":
+        return {"broadcaster_user_id": broadcaster_id, "user_id": broadcaster_id}
+    raise ValueError(f"Tipo de suscripción EventSub no soportado: {sub_type}")
+
+
+def create_twitch_eventsub_subscription(app_access_token, client_id, sub_type, version, condition):
+    """
+    Crea UNA suscripción EventSub (transporte webhook) en la API de Twitch.
+    Devuelve el subscription_id si se creó, o None si Twitch responde 409
+    Conflict porque ya existe una suscripción idéntica (mismo
+    type+condition+callback) -- se trata como éxito, no como error, para
+    que volver a vincular la cuenta sea una operación idempotente y segura.
+    Cualquier otro fallo (scope no concedido, credenciales inválidas, etc.)
+    se propaga como requests.HTTPError para que la llamada lo capture.
+    """
+    resp = requests.post(
+        f"{TWITCH_HELIX_API}/eventsub/subscriptions",
+        headers={
+            "Client-Id": client_id,
+            "Authorization": f"Bearer {app_access_token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "type": sub_type,
+            "version": version,
+            "condition": condition,
+            "transport": {
+                "method": "webhook",
+                "callback": TWITCH_EVENTSUB_CALLBACK_URL,
+                "secret": TWITCH_EVENTSUB_SECRET,
+            },
+        },
+        timeout=10,
+    )
+    if resp.status_code == 409:
+        return None
+    resp.raise_for_status()
+    data = resp.json().get("data") or []
+    return data[0]["id"] if data else None
+
+
+def ensure_twitch_eventsub_subscriptions(config, broadcaster_id):
+    """
+    Crea (o reutiliza) las 3 suscripciones EventSub de sanciones para
+    broadcaster_id, usando el Client ID/Secret de Twitch de ESTE cliente
+    (config['twitch']['credentials']). Guarda los subscription_id
+    resultantes en twitch.subscription_ids del bot/cliente activo de la
+    sesión.
+
+    Devuelve (subscription_ids, errores): un fallo en un tipo de
+    suscripción (p.ej. un scope que Twitch todavía no concedió) NUNCA
+    bloquea a los demás -- cada uno se intenta por separado y los errores
+    se acumulan para poder avisar al cliente sin perder las suscripciones
+    que sí se crearon correctamente.
+
+    Lanza ValueError si falta algún requisito previo (secreto del webhook
+    sin configurar en el servidor, o Client ID/Secret de Twitch del cliente
+    todavía vacíos) -- son errores de configuración, no de Twitch, así que
+    se distinguen para poder mostrar un mensaje claro.
+    """
+    if not TWITCH_EVENTSUB_SECRET:
+        raise ValueError(
+            "Falta configurar la variable de entorno TWITCH_EVENTSUB_SECRET en el servidor."
+        )
+
+    credentials = config.get("twitch", {}).get("credentials", {})
+    client_id = credentials.get("client_id", "")
+    client_secret = credentials.get("client_secret", "")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Configura primero el Client ID y Client Secret de tu app de Twitch en esta página."
+        )
+
+    app_token = get_twitch_app_access_token(client_id, client_secret)
+
+    subscription_ids = {}
+    errors = []
+    for sub in TWITCH_EVENTSUB_SUBSCRIPTIONS:
+        try:
+            condition = _twitch_eventsub_condition(sub["type"], broadcaster_id)
+            sub_id = create_twitch_eventsub_subscription(
+                app_token, client_id, sub["type"], sub["version"], condition
+            )
+            if sub_id:
+                subscription_ids[sub["type"]] = sub_id
+        except requests.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.response.json().get("message", "")
+            except Exception:
+                pass
+            errors.append(f"{sub['type']}: {detail or e}")
+
+    if subscription_ids:
+        try:
+            save_fields({"twitch.subscription_ids": subscription_ids})
+        except PyMongoError:
+            pass
+
+    return subscription_ids, errors
+
+
+def send_discord_log_message(bot_token, channel_id, content):
+    """
+    Envía un mensaje de texto simple al canal de Discord de un cliente
+    usando su propio bot_token, vía la API REST de Discord directamente
+    (igual patrón que save_panel() para tickets) -- no depende de que el
+    proceso del bot (discord.py) esté corriendo ni de discord.py en
+    absoluto, así que funciona igual de bien llamado desde una vista con
+    sesión que desde el webhook de EventSub, que no tiene sesión Flask.
+    """
+    resp = requests.post(
+        f"{DISCORD_API}/channels/{channel_id}/messages",
+        headers={
+            "Authorization": f"Bot {bot_token}",
+            "Content-Type": "application/json",
+        },
+        json={"content": content},
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+
+def _twitch_moderation_alert_text(sub_type, event):
+    """
+    Construye el texto del aviso de Discord a partir del tipo de
+    suscripción EventSub y su payload, y devuelve (filter_key, texto).
+    filter_key es la clave de config.twitch.filters que hay que comprobar
+    antes de enviar nada ("ban" / "timeout" / "warning" / "delete_message").
+    """
+    moderator = event.get("moderator_user_name") or "un moderador"
+    user = event.get("user_name") or event.get("user_login") or "un usuario"
+
+    if sub_type == "channel.ban":
+        if event.get("is_permanent"):
+            return "ban", f"🔨 **{moderator}** ha baneado permanentemente a **{user}** en Twitch."
+        ends_at = event.get("ends_at") or ""
+        return (
+            "timeout",
+            f"⏱️ **{moderator}** ha silenciado temporalmente a **{user}** en Twitch"
+            + (f" (hasta {ends_at})" if ends_at else "")
+            + ".",
+        )
+
+    if sub_type == "channel.warning.send":
+        reason = event.get("reason") or ""
+        texto = f"⚠️ **{moderator}** ha enviado una advertencia a **{user}** en Twitch."
+        if reason:
+            texto += f" Motivo: {reason}"
+        return "warning", texto
+
+    if sub_type == "channel.chat.message_delete":
+        return "delete_message", f"🗑️ Se ha borrado un mensaje de **{user}** en el chat de Twitch."
+
+    return None, ""
+
+
+def handle_twitch_eventsub_notification(sub_type, event):
+    """
+    Procesa UNA notificación de sanción ya verificada (firma HMAC correcta).
+    Busca el bot/cliente dueño de ese broadcaster_id, respeta sus filtros
+    (twitch.filters) y, si corresponde, envía el aviso a su canal de
+    Discord (twitch.log_channel_id) con su propio bot_token -- todo
+    completamente aislado por cliente, nunca se mezclan datos de un cliente
+    con los de otro.
+    """
+    broadcaster_id = event.get("broadcaster_user_id")
+    if not broadcaster_id or not mongo_ready():
+        return
+
+    doc = config_collection.find_one({"twitch.broadcaster_id": broadcaster_id})
+    if not doc:
+        # Ningún cliente tiene este broadcaster_id vinculado (o se
+        # desvinculó). Es un ack normal, no un error: Twitch no debe
+        # reintentar esta notificación.
+        print(f"[WARN] EventSub: broadcaster_id {broadcaster_id} sin cliente asociado.")
+        return
+
+    bot_id = doc["_id"]
+    config = get_config(bot_id=bot_id)
+    twitch_cfg = config.get("twitch", {})
+
+    filter_key, texto = _twitch_moderation_alert_text(sub_type, event)
+    if not filter_key or not texto:
+        return
+
+    if not twitch_cfg.get("filters", {}).get(filter_key, True):
+        return  # El cliente desactivó este tipo de aviso.
+
+    log_channel_id = twitch_cfg.get("log_channel_id")
+    if not log_channel_id:
+        return  # No ha elegido todavía un canal de Discord para los logs.
+
+    bot_token = active_bot_token(config)
+    try:
+        send_discord_log_message(bot_token, log_channel_id, texto)
+    except requests.RequestException as e:
+        print(f"[WARN] No se pudo enviar el aviso de sanción de Twitch a Discord (bot_id={bot_id}): {e}")
+
+
+@app.route("/twitch/oauth/login")
+@requires_module("twitch")
+def twitch_oauth_login():
+    """
+    Paso 1 de la vinculación de la cuenta de Twitch del cliente: lo manda a
+    autorizar en Twitch los scopes necesarios para las 3 suscripciones
+    EventSub de sanciones. Requiere que el cliente ya haya guardado el
+    Client ID de su propia app de Twitch en esta página (/twitch) --
+    exactamente igual que Discord: el login autentica, nunca crea ni
+    vincula nada por sí solo hasta que el cliente confirma en la pantalla
+    de autorización de Twitch.
+    """
+    config = safe_get_config()
+    client_id = config.get("twitch", {}).get("credentials", {}).get("client_id", "")
+    if not client_id:
+        flash(
+            "Configura primero el Client ID de tu app de Twitch más abajo antes de vincular la cuenta.",
+            "error",
+        )
+        return redirect(url_for("twitch_config"))
+
+    state = secrets.token_urlsafe(16)
+    session["twitch_oauth_state"] = state
+    params = {
+        "client_id": client_id,
+        "redirect_uri": TWITCH_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(TWITCH_OAUTH_SCOPES),
+        "state": state,
+        "force_verify": "true",
+    }
+    return redirect(f"{TWITCH_AUTH_API}/authorize?{urlencode(params)}")
+
+
+@app.route("/twitch/oauth/callback")
+@requires_module("twitch")
+def twitch_oauth_callback():
+    """
+    Paso 2: Twitch redirige aquí con un "code" tras la autorización del
+    streamer. Intercambia el code por access_token/refresh_token, obtiene
+    el broadcaster_id real (GET /helix/users), cifra y guarda todo, y
+    finalmente crea las 3 suscripciones EventSub para ese broadcaster_id.
+    """
+    code = request.args.get("code")
+    state = request.args.get("state")
+    error = request.args.get("error_description") or request.args.get("error")
+
+    if error:
+        flash(f"Twitch denegó la autorización: {error}", "error")
+        return redirect(url_for("twitch_config"))
+
+    if not code or state != session.get("twitch_oauth_state"):
+        flash("No se pudo completar la vinculación con Twitch.", "error")
+        return redirect(url_for("twitch_config"))
+    session.pop("twitch_oauth_state", None)
+
+    config = safe_get_config()
+    credentials = config.get("twitch", {}).get("credentials", {})
+    client_id = credentials.get("client_id", "")
+    client_secret = credentials.get("client_secret", "")
+    if not client_id or not client_secret:
+        flash(
+            "Configura primero el Client ID y Client Secret de tu app de Twitch en esta página.",
+            "error",
+        )
+        return redirect(url_for("twitch_config"))
+
+    try:
+        token_resp = requests.post(
+            f"{TWITCH_AUTH_API}/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": TWITCH_OAUTH_REDIRECT_URI,
+            },
+            timeout=10,
+        )
+        token_resp.raise_for_status()
+        token_data = token_resp.json()
+        access_token = token_data["access_token"]
+        refresh_token = token_data.get("refresh_token", "")
+    except (requests.RequestException, ValueError, KeyError) as e:
+        flash(f"No se pudo intercambiar el código de Twitch por un token: {e}", "error")
+        return redirect(url_for("twitch_config"))
+
+    try:
+        users_resp = requests.get(
+            f"{TWITCH_HELIX_API}/users",
+            headers={"Client-Id": client_id, "Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        users_resp.raise_for_status()
+        users_data = users_resp.json().get("data") or []
+        broadcaster_id = users_data[0]["id"] if users_data else ""
+    except (requests.RequestException, ValueError, KeyError, IndexError) as e:
+        flash(f"No se pudo obtener tu ID de canal de Twitch: {e}", "error")
+        return redirect(url_for("twitch_config"))
+
+    if not broadcaster_id:
+        flash("Twitch no devolvió un ID de canal válido.", "error")
+        return redirect(url_for("twitch_config"))
+
+    try:
+        save_fields(
+            {
+                "twitch.broadcaster_id": broadcaster_id,
+                "twitch.access_token": encrypt_secret(access_token),
+                "twitch.refresh_token": encrypt_secret(refresh_token),
+            }
+        )
+    except PyMongoError as e:
+        flash(f"No se pudo guardar la vinculación con Twitch: {e}", "error")
+        return redirect(url_for("twitch_config"))
+
+    config = safe_get_config()  # recarga ya con broadcaster_id/credenciales frescas
+    try:
+        _, errors = ensure_twitch_eventsub_subscriptions(config, broadcaster_id)
+    except ValueError as e:
+        flash(f"Cuenta de Twitch vinculada, pero no se pudieron activar los avisos: {e}", "error")
+        return redirect(url_for("twitch_config"))
+
+    if errors:
+        flash(
+            "Cuenta de Twitch vinculada. Algunos avisos no se pudieron activar: "
+            + "; ".join(errors),
+            "error",
+        )
+    else:
+        flash("✅ Cuenta de Twitch vinculada y logs de sanciones activados.", "success")
+
+    return redirect(url_for("twitch_config"))
+
+
+@app.route("/webhooks/twitch/eventsub", methods=["POST"])
+def twitch_eventsub_webhook():
+    """
+    Endpoint público (sin sesión, sin @requires_login) que recibe TODAS las
+    notificaciones de EventSub de TODOS los clientes -- Twitch llama a esta
+    misma URL fija para cualquier broadcaster suscrito; el aislamiento por
+    cliente se hace dentro de handle_twitch_eventsub_notification() buscando
+    el bot_id dueño de cada broadcaster_id.
+
+    Verificación obligatoria antes de confiar en nada del payload: la firma
+    HMAC-SHA256 en Twitch-Eventsub-Message-Signature, calculada por Twitch
+    sobre (message_id + timestamp + cuerpo crudo) con TWITCH_EVENTSUB_SECRET.
+    Sin esto, cualquiera podría enviar avisos falsos de sanciones a los
+    canales de Discord de los clientes.
+    """
+    if not TWITCH_EVENTSUB_SECRET:
+        # Nunca debería llegar tráfico real aquí si no se configuró el
+        # secreto, pero por si acaso: rechazar en vez de procesar sin
+        # verificar nada.
+        return ("EventSub no configurado", 500)
+
+    message_id = request.headers.get("Twitch-Eventsub-Message-Id", "")
+    timestamp = request.headers.get("Twitch-Eventsub-Message-Timestamp", "")
+    signature = request.headers.get("Twitch-Eventsub-Message-Signature", "")
+    message_type = request.headers.get("Twitch-Eventsub-Message-Type", "")
+    raw_body = request.get_data()  # bytes crudos -- la firma se calcula sobre esto, NUNCA sobre request.json
+
+    expected = (
+        "sha256="
+        + hmac.new(
+            TWITCH_EVENTSUB_SECRET.encode(),
+            message_id.encode() + timestamp.encode() + raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
+    if not signature or not hmac.compare_digest(expected, signature):
+        return ("Firma inválida", 403)
+
+    try:
+        payload = json.loads(raw_body)
+    except ValueError:
+        return ("JSON inválido", 400)
+
+    if message_type == "webhook_callback_verification":
+        # Twitch valida que este endpoint es realmente nuestro respondiendo
+        # con el "challenge" tal cual, en texto plano, al crear cada
+        # suscripción.
+        return (payload.get("challenge", ""), 200, {"Content-Type": "text/plain"})
+
+    if message_type == "revocation":
+        sub = payload.get("subscription", {})
+        print(
+            f"[WARN] Twitch revocó una suscripción EventSub: "
+            f"type={sub.get('type')} status={sub.get('status')} condition={sub.get('condition')}"
+        )
+        return ("", 200)
+
+    if message_type == "notification":
+        sub_type = payload.get("subscription", {}).get("type", "")
+        event = payload.get("event", {})
+        try:
+            handle_twitch_eventsub_notification(sub_type, event)
+        except Exception as e:
+            # Nunca devolver un error 5xx por un fallo nuestro al procesar
+            # el evento -- Twitch reintentaría (y reintentaría) la misma
+            # notificación indefinidamente. Se registra y se responde 200.
+            print(f"[WARN] Error procesando notificación EventSub ({sub_type}): {e}")
+        return ("", 200)
+
+    return ("", 200)
+
+
+# ------------------------------------------------------------------
 # Vista de configuración del módulo de Twitch (notificaciones de directos)
 # ------------------------------------------------------------------
 @app.route("/twitch")
@@ -1914,8 +2484,27 @@ def save_twitch():
         "client_secret": encrypt_secret(new_client_secret or current_client_secret),
     }
 
+    # Logs de sanciones: canal de Discord + toggles por tipo de sanción.
+    # No tocan broadcaster_id/access_token/refresh_token/subscription_ids
+    # -- esos los gestiona exclusivamente el flujo OAuth
+    # (twitch_oauth_login/twitch_oauth_callback), nunca este formulario.
+    log_channel_id = form.get("twitch_log_channel_id", "").strip()
+    filters = {
+        "ban": "twitch_filter_ban" in form,
+        "timeout": "twitch_filter_timeout" in form,
+        "warning": "twitch_filter_warning" in form,
+        "delete_message": "twitch_filter_delete_message" in form,
+    }
+
     try:
-        save_fields({"twitch.live": live, "twitch.credentials": credentials})
+        save_fields(
+            {
+                "twitch.live": live,
+                "twitch.credentials": credentials,
+                "twitch.log_channel_id": log_channel_id,
+                "twitch.filters": filters,
+            }
+        )
         flash("Configuración de Twitch guardada correctamente.", "success")
     except PyMongoError as e:
         flash(f"Error al guardar en MongoDB: {e}", "error")
