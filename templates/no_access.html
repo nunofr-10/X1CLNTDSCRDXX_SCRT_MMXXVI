@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard · Acceso bloqueado</title>
+<title>Dashboard · {% if blocked %}Acceso bloqueado{% else %}Configura tu bot{% endif %}</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
@@ -34,11 +34,23 @@
 
 <main class="min-h-screen flex items-center justify-center px-6">
   <div class="max-w-md w-full bg-panel border border-border rounded-2xl p-8 text-center space-y-5">
-    <div class="text-5xl">🚫</div>
-    <h1 class="text-xl font-bold text-white">Tu acceso está bloqueado por el administrador</h1>
-    <p class="text-sm text-muted leading-relaxed">
-      Si crees que esto es un error, contacta con el administrador del sistema.
-    </p>
+    {% if blocked %}
+      <div class="text-5xl">🚫</div>
+      <h1 class="text-xl font-bold text-white">Tu acceso está bloqueado por el administrador</h1>
+      <p class="text-sm text-muted leading-relaxed">
+        Si crees que esto es un error, contacta con el administrador del sistema.
+      </p>
+    {% else %}
+      <div class="text-5xl">🤖</div>
+      <h1 class="text-xl font-bold text-white">Sesión iniciada correctamente</h1>
+      <p class="text-sm text-muted leading-relaxed">
+        Tu cuenta de Discord ya está conectada. Todavía no tienes ningún bot
+        asignado en la plataforma: la creación y configuración de tu bot la
+        gestiona el administrador desde su panel interno, no durante el
+        inicio de sesión. Contacta con el administrador para activar tu
+        primer bot y podrás volver a entrar aquí para gestionarlo.
+      </p>
+    {% endif %}
     {% if user %}
       <p class="text-xs text-muted">
         Conectado como <span class="text-slate-200 font-medium">{{ user.username }}</span>
