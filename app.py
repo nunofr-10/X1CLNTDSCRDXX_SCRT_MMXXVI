@@ -1409,6 +1409,7 @@ def tickets_config():
             roles=roles,
             roles_json=roles_to_json(roles),
             guild_id=guild_id,
+            user=current_user(),
         )
     except Exception as e:
         flash(f"No se pudo cargar la configuración de Tickets: {e}", "error")
@@ -1664,6 +1665,7 @@ def moderation_config():
             roles_json=roles_to_json(roles),
             guild_id=guild_id,
             moderation_commands=MODERATION_COMMANDS,
+            user=current_user(),
         )
     except Exception as e:
         flash(f"No se pudo cargar la configuración de Moderación: {e}", "error")
@@ -1777,6 +1779,7 @@ def youtube_config():
             channels=channels,
             roles=roles,
             guild_id=guild_id,
+            user=current_user(),
         )
     except Exception as e:
         flash(f"No se pudo cargar la configuración de YouTube: {e}", "error")
@@ -1856,6 +1859,7 @@ def twitch_config():
             channels=channels,
             roles=roles,
             guild_id=guild_id,
+            user=current_user(),
         )
     except Exception as e:
         flash(f"No se pudo cargar la configuración de Twitch: {e}", "error")
