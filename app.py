@@ -286,6 +286,7 @@ LICENSABLE_MODULES = [
     {"key": "moderation", "label": "Moderación"},
     {"key": "youtube", "label": "YouTube"},
     {"key": "twitch", "label": "Twitch"},
+    {"key": "twitch_logs", "label": "Logs Twitch"},
     {"key": "wick_security", "label": "Anti-Raid (BETA)"},
 ]
 
@@ -625,6 +626,12 @@ DEFAULT_CONFIG = {
         "moderation": True,
         "youtube": True,
         "twitch": True,
+        # Módulo independiente de Twitch (no depende de "twitch"): logs de
+        # sanciones en tiempo real vía EventSub. Tiene su propia tarjeta,
+        # su propio candado de licencia y su propia página (/twitch/logs) --
+        # solo comparte con "twitch" el Client ID/Secret de la app de Twitch
+        # del cliente, que es infraestructura técnica, no licencia.
+        "twitch_logs": True,
         # Licencia única que cubre TODO el sistema Anti-Raid / WickSecurity
         # (AutoMod, AntiNuke, Cuarentena y JoinGate comparten un solo
         # candado/página).
@@ -637,6 +644,7 @@ DEFAULT_CONFIG = {
         "moderation": True,
         "youtube": True,
         "twitch": True,
+        "twitch_logs": True,
         # Switch maestro del sistema Anti-Raid / WickSecurity completo
         # (tarjeta propia en modules.html, licenciado como un único bloque
         # -- ver allowed_modules.wick_security).
@@ -711,6 +719,18 @@ TWITCH_MODULE = {
     "badge": "Nuevo",
     "description": "Notificación automática en Discord en cuanto tu canal de Twitch "
     "se pone en directo.",
+}
+
+# Módulo independiente de "Twitch" (notificaciones de directo) -- licencia,
+# tarjeta y candado propios. Solo comparte con "twitch" el Client ID/Secret
+# de la app de Twitch del cliente (infraestructura técnica), nunca el
+# estado de encendido/apagado ni la licencia.
+TWITCH_LOGS_MODULE = {
+    "id": "twitch_logs",
+    "name": "Logs Twitch",
+    "badge": "Nuevo",
+    "description": "Avisos en Discord en tiempo real de baneos, timeouts, advertencias "
+    "y mensajes borrados por los moderadores de tu canal de Twitch.",
 }
 
 WICK_SECURITY_MODULE = {
@@ -1392,6 +1412,7 @@ def index():
             moderation_module=MODERATION_MODULE,
             youtube_module=YOUTUBE_MODULE,
             twitch_module=TWITCH_MODULE,
+            twitch_logs_module=TWITCH_LOGS_MODULE,
             wick_security_module=WICK_SECURITY_MODULE,
             config=config,
             user=current_user(),
@@ -1406,6 +1427,7 @@ def index():
             moderation_module=MODERATION_MODULE,
             youtube_module=YOUTUBE_MODULE,
             twitch_module=TWITCH_MODULE,
+            twitch_logs_module=TWITCH_LOGS_MODULE,
             wick_security_module=WICK_SECURITY_MODULE,
             config=dict(DEFAULT_CONFIG),
             user=current_user(),
@@ -1469,6 +1491,12 @@ def save_modules():
         "twitch": (
             request.form.get("modules_twitch") == "true"
             or request.form.get("modules_twitch_enabled") == "true"
+        ),
+        # Módulo independiente de "twitch" (ver TWITCH_LOGS_MODULE): su
+        # propio switch, su propia licencia, su propia tarjeta.
+        "twitch_logs": (
+            request.form.get("modules_twitch_logs") == "true"
+            or request.form.get("modules_twitch_logs_enabled") == "true"
         ),
         # Switch maestro del sistema Anti-Raid / WickSecurity (AutoMod/
         # AntiNuke/JoinGate/Cuarentena). Los 4 submódulos NO tienen tarjeta
@@ -2494,13 +2522,15 @@ def save_twitch():
 
 
 # ------------------------------------------------------------------
-# Vista de configuración de los Logs de sanciones de Twitch (EventSub) --
-# página separada de /twitch a propósito: son dos módulos de UI
-# independientes (directos vs. sanciones) que comparten únicamente las
-# credenciales de la app de Twitch del cliente (twitch.credentials).
+# Vista de configuración de "Logs Twitch" -- MÓDULO INDEPENDIENTE de
+# "Twitch" (notificaciones de directo): licencia propia
+# (allowed_modules.twitch_logs), switch propio (modules.twitch_logs) y
+# tarjeta propia en modules.html. Solo comparte con "twitch" el Client
+# ID/Secret de la app de Twitch del cliente (config.twitch.credentials),
+# que es infraestructura técnica de la API de Twitch, no una licencia.
 # ------------------------------------------------------------------
 @app.route("/twitch/logs")
-@requires_module("twitch")
+@requires_module("twitch_logs")
 def twitch_logs_config():
     guild_id = current_guild_id()
     if not guild_id:
@@ -2532,7 +2562,7 @@ def twitch_logs_config():
 
 
 @app.route("/twitch/logs/save", methods=["POST"])
-@requires_module("twitch")
+@requires_module("twitch_logs")
 def save_twitch_logs():
     """
     Guarda el canal de Discord y los toggles de filtro de los logs de
