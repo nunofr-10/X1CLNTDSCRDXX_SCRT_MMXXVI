@@ -175,9 +175,9 @@
 
   <header class="flex items-center justify-between px-8 py-5 border-b border-border">
     <div class="flex items-center gap-3 text-sm">
-      <a href="{{ url_for('twitch_config') }}" class="text-muted hover:text-slate-100">← Twitch</a>
+      <a href="{{ url_for('index') }}" class="text-muted hover:text-slate-100">← Módulos</a>
       <span class="text-border">|</span>
-      <h1 class="text-xl font-bold text-white">Logs de Twitch</h1>
+      <h1 class="text-xl font-bold text-white">Logs Twitch</h1>
     </div>
     <div class="flex items-center gap-6 text-sm text-muted">
       {% if user %}
@@ -200,9 +200,9 @@
       {% endif %}
     {% endwith %}
 
-    {% if not config.modules.twitch %}
+    {% if not config.modules.twitch_logs %}
       <div class="rounded-lg px-4 py-3 text-sm border bg-amber-500/10 border-amber-500 text-amber-400 flex items-center justify-between gap-4 flex-wrap">
-        <span>⚠️ El módulo de Twitch está <strong>desactivado</strong>. No se enviará ningún log hasta que lo actives.</span>
+        <span>⚠️ El módulo de Logs Twitch está <strong>desactivado</strong>. No se enviará ningún log hasta que lo actives.</span>
         <a href="{{ url_for('index') }}" class="text-xs font-semibold underline whitespace-nowrap">Activar en Módulos</a>
       </div>
     {% endif %}

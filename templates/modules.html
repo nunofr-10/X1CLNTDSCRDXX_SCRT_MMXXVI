@@ -328,6 +328,7 @@
         {{ module_card(moderation_module, config.modules.moderation, "modules_moderation", url_for('moderation_config'), "🛡️", allowed=config.allowed_modules.moderation) }}
         {{ module_card(youtube_module, config.modules.youtube, "modules_youtube", url_for('youtube_config'), "▶️", allowed=config.allowed_modules.youtube) }}
         {{ module_card(twitch_module, config.modules.twitch, "modules_twitch", url_for('twitch_config'), "🟣", allowed=config.allowed_modules.twitch) }}
+        {{ module_card(twitch_logs_module, config.modules.twitch_logs, "modules_twitch_logs", url_for('twitch_logs_config'), "🚨", allowed=config.allowed_modules.twitch_logs) }}
         {{ module_card(wick_security_module, config.modules.wick_security, "modules_wick_security", url_for('wick_security_config'), "🛡️", allowed=config.allowed_modules.wick_security) }}
       </form>
 
