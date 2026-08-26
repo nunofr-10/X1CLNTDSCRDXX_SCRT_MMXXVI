@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard · Configuración de Moderación</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          base: "#07080c",
+          panel: "#171a23",
+          card: "#12141c",
+          border: "#252836",
+          accent: "#5865f2",
+          muted: "#8b8fa3",
+          ok: "#23a55a",
+          err: "#ed4245",
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: "Segoe UI", Roboto, -apple-system, sans-serif; }
+
+  .switch {
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: #2a2f3d;
+    position: relative;
+    flex-shrink: 0;
+    appearance: none;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.15s ease;
+  }
+  .switch::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s ease;
+  }
+  .switch:checked { background: #23a55a; }
+  .switch:checked::before { transform: translateX(18px); }
+
+  /* --- Selector de roles estilo BotGhost (multi-instancia) --- */
+  .role-picker-instance { position: relative; }
+  .role-picker {
+    position: relative;
+    background: #2b2d31;
+    border: 1px solid #3a3d44;
+    border-radius: 12px;
+    padding: 10px;
+  }
+  .role-picker-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+  }
+  .role-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #1e2025;
+    border: 1px solid #3a3d44;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: #e3e5e8;
+  }
+  .role-badge .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .role-badge button {
+    background: none;
+    border: none;
+    color: #8b8fa3;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0;
+  }
+  .role-badge button:hover { color: #ed4245; }
+
+  .role-picker-add-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #3a3d44;
+    color: #fff;
+    border: none;
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease;
+  }
+  .role-picker-add-btn:hover { background: #5865f2; }
+
+  .role-picker-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 320px;
+    max-width: 90vw;
+    background: #1e2025;
+    border: 1px solid #3a3d44;
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+    z-index: 50;
+    overflow: hidden;
+  }
+  .role-picker-tabs { display: flex; border-bottom: 1px solid #3a3d44; }
+  .role-picker-tab {
+    flex: 1;
+    padding: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8b8fa3;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+  }
+  .role-picker-tab.active { color: #fff; border-bottom-color: #5865f2; }
+  .role-picker-panel { padding: 12px; }
+  .role-picker-search {
+    width: 100%;
+    background: #2b2d31;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: #e3e5e8;
+    margin-bottom: 10px;
+  }
+  .role-picker-results { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .role-picker-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #e3e5e8;
+  }
+  .role-picker-option:hover { background: #2b2d31; }
+  .role-picker-option.selected { background: rgba(88,101,242,0.18); }
+  .role-picker-empty { font-size: 12px; color: #8b8fa3; padding: 8px 4px; }
+  .role-picker-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #8b8fa3;
+    margin-bottom: 6px;
+  }
+  .role-picker-id-row { display: flex; gap: 8px; }
+  .role-picker-id-input {
+    flex: 1;
+    background: #2b2d31;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: #e3e5e8;
+    font-family: monospace;
+  }
+  .role-picker-id-input.input-error { border-color: #ed4245; }
+  .role-picker-id-btn {
+    background: #5865f2;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .role-picker-id-btn:hover { background: #4752c4; }
+
+  /* --- Barra flotante de cambios sin guardar --- */
+  #unsaved-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%) translateY(120%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+    z-index: 100;
+    background: #1e2025;
+    border: 1px solid #3a3d44;
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 92vw;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #unsaved-bar.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+  #unsaved-bar .unsaved-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f5c451;
+    white-space: nowrap;
+  }
+  #unsaved-bar .unsaved-actions { display: flex; gap: 8px; }
+  .btn-save-bar {
+    background: #23a55a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-save-bar:hover { background: #1c8a4a; }
+  .btn-save-bar:disabled { opacity: 0.6; cursor: default; }
+  .btn-discard-bar {
+    background: transparent;
+    color: #e3e5e8;
+    border: 1px solid #3a3d44;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .btn-discard-bar:hover { background: #2b2d31; border-color: #ed4245; color: #ed4245; }
+
+  /* --- Modal de bloqueo de navegación --- */
+  #nav-guard-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(5,6,10,0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  #nav-guard-modal.show { opacity: 1; pointer-events: auto; }
+  #nav-guard-modal .modal-box {
+    background: #171a23;
+    border: 1px solid #252836;
+    border-radius: 14px;
+    padding: 24px;
+    width: 380px;
+    max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    transform: translateY(10px);
+    transition: transform 0.15s ease;
+  }
+  #nav-guard-modal.show .modal-box { transform: translateY(0); }
+  #nav-guard-modal h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  #nav-guard-modal p { font-size: 13px; color: #8b8fa3; margin-bottom: 20px; line-height: 1.5; }
+  #nav-guard-modal .modal-actions { display: flex; flex-direction: column; gap: 8px; }
+  .btn-modal-primary {
+    background: #5865f2; color: #fff; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-primary:hover { background: #4752c4; }
+  .btn-modal-danger {
+    background: transparent; color: #ed4245; border: 1px solid #3a3d44; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-danger:hover { background: rgba(237,66,69,0.1); border-color: #ed4245; }
+  .btn-modal-ghost {
+    background: transparent; color: #8b8fa3; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-modal-ghost:hover { color: #e3e5e8; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
+    animation: spin 0.6s linear infinite; display: inline-block;
+  }
+</style>
+</head>
+<body class="bg-base text-slate-100 min-h-screen">
+
+{% include "_simulation_banner.html" %}
+
+{% macro role_picker(field_name, selected_roles) %}
+  <div class="role-picker-instance" data-selected='{{ selected_roles | tojson }}'>
+    <input type="hidden" name="{{ field_name }}" class="role-picker-hidden" value="{{ selected_roles|join(',') }}">
+    <div class="role-picker">
+      <div class="role-picker-tags">
+        <button type="button" class="role-picker-add-btn" title="Añadir rol">+</button>
+      </div>
+
+      <div class="role-picker-popover hidden">
+        <div class="role-picker-tabs">
+          <button type="button" class="role-picker-tab active" data-tab="server">Seleccionar del Servidor</button>
+          <button type="button" class="role-picker-tab" data-tab="id">Añadir por ID</button>
+        </div>
+
+        <div class="role-picker-panel" data-panel="server">
+          <input type="text" class="role-picker-search" placeholder="Buscar rol…" autocomplete="off">
+          <div class="role-picker-results">
+            <p class="role-picker-empty">Cargando roles…</p>
+          </div>
+        </div>
+
+        <div class="role-picker-panel hidden" data-panel="id">
+          <label class="role-picker-label">ID del rol de Discord</label>
+          <div class="role-picker-id-row">
+            <input type="text" class="role-picker-id-input" placeholder="Ej: 123456789012345678" autocomplete="off">
+            <button type="button" class="role-picker-id-btn">Añadir</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endmacro %}
+
+  <header class="flex items-center justify-between px-8 py-5 border-b border-border">
+    <div class="flex items-center gap-3 text-sm">
+      <a href="{{ url_for('index') }}" class="text-muted hover:text-slate-100">← Módulos</a>
+      <span class="text-border">|</span>
+      <h1 class="text-xl font-bold text-white">Moderación</h1>
+    </div>
+    <div class="flex items-center gap-6 text-sm text-muted">
+      {% if user %}
+        <span>Conectado como <span class="text-slate-200 font-medium">{{ user.username }}</span></span>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="px-6 py-8 max-w-4xl mx-auto space-y-6">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="rounded-lg px-4 py-3 text-sm border
+            {% if category == 'success' %} bg-ok/10 border-ok text-ok
+            {% else %} bg-err/10 border-err text-err {% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% if not config.modules.moderation %}
+      <div class="rounded-lg px-4 py-3 text-sm border bg-amber-500/10 border-amber-500 text-amber-400 flex items-center justify-between gap-4 flex-wrap">
+        <span>⚠️ El módulo de Moderación está <strong>desactivado</strong>. Los comandos no funcionarán en Discord hasta que lo actives.</span>
+        <a href="{{ url_for('index') }}" class="text-xs font-semibold underline whitespace-nowrap">Activar en Módulos</a>
+      </div>
+    {% endif %}
+
+    <!-- Ajustes generales -->
+    <section id="general" class="bg-card border border-border rounded-xl p-6">
+      <h2 class="text-lg font-bold text-white mb-1">Ajustes de moderación</h2>
+      <p class="text-sm text-muted mb-5">
+        Roles de staff generales y canal de logs. Se usan como respaldo cuando un comando
+        no tiene roles específicos propios (ver "Comandos y permisos" más abajo).
+      </p>
+
+      <form action="{{ url_for('save_moderation') }}" method="POST" class="space-y-6" data-autosave>
+
+        <!-- Roles de Staff / Moderación -->
+        <div>
+          <label class="block text-xs font-bold uppercase text-muted mb-2">Roles de Staff / Moderación</label>
+          <p class="text-xs text-muted mb-3">
+            Estos roles (además de Administrador y Gestionar Mensajes) podrán usar cualquier
+            comando de moderación que no tenga roles específicos propios asignados.
+          </p>
+
+          {{ role_picker("staff_roles", config.staff_roles) }}
+
+          {% if not roles %}
+            <p class="text-xs text-err mt-2">No se encontraron roles. Verifica que el bot esté en el servidor.</p>
+          {% endif %}
+        </div>
+
+        <!-- Canal de Logs -->
+        <div>
+          <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de Logs</label>
+          <select name="mod_log_channel_id"
+                  class="w-full sm:w-1/2 bg-panel border border-border rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-accent">
+            <option value="" {% if not config.mod_log_channel_id %}selected{% endif %}>Sin canal de logs (desactivado)</option>
+            {% for c in channels %}
+              <option value="{{ c.id }}" {% if config.mod_log_channel_id == c.id %}selected{% endif %}>#{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          {% if not channels %}
+            <p class="text-xs text-err mt-2">No se encontraron canales. Verifica que el bot esté en el servidor.</p>
+          {% endif %}
+          <p class="text-xs text-muted mt-2">
+            Aquí se enviará un embed con cada sanción aplicada (warn, mute, kick, ban, clear…).
+          </p>
+        </div>
+      </form>
+    </section>
+
+    <!-- Comandos y permisos individuales -->
+    <section id="comandos" class="bg-card border border-border rounded-xl p-6">
+      <h2 class="text-lg font-bold text-white mb-1">Comandos y permisos</h2>
+      <p class="text-sm text-muted mb-5">
+        Activa o desactiva cada comando de forma individual y define qué roles pueden usarlo.
+        Un comando desactivado no aparecerá al escribir "/" en Discord. Si no asignas roles
+        específicos a un comando, se usarán los Roles de Staff generales de arriba.
+      </p>
+
+      <form action="{{ url_for('save_moderation_commands') }}" method="POST" class="space-y-4" data-autosave>
+        {% for cmd in moderation_commands %}
+          {% set cmd_cfg = config.commands.get(cmd.key, {"enabled": True, "roles": []}) %}
+          <div class="border border-border rounded-lg p-4 space-y-3">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm font-semibold text-white font-mono">{{ cmd.label }}</p>
+                <p class="text-xs text-muted">{{ cmd.description }}</p>
+              </div>
+              <input type="checkbox" name="cmd_{{ cmd.key }}_enabled" class="switch"
+                     {% if cmd_cfg.enabled %}checked{% endif %}>
+            </div>
+
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-muted mb-2">
+                Roles autorizados para {{ cmd.label }}
+              </label>
+              {{ role_picker("cmd_" ~ cmd.key ~ "_roles", cmd_cfg.roles) }}
+            </div>
+          </div>
+        {% endfor %}
+      </form>
+    </section>
+
+  </main>
+
+  <script id="serverRolesData" type="application/json">{{ roles_json | tojson }}</script>
+
+  <script>
+    // ------------------------------------------------------------------
+    // Selector de roles estilo BotGhost — soporta múltiples instancias en
+    // la misma página (una general + una por cada comando de moderación).
+    // Los roles del servidor se cargan una sola vez y se comparten entre
+    // todas las instancias.
+    // ------------------------------------------------------------------
+    (function initRolePickers() {
+      const instances = document.querySelectorAll(".role-picker-instance");
+      if (!instances.length) return;
+
+      const seedRoles = JSON.parse(document.getElementById("serverRolesData").textContent || "[]");
+      let allRoles = seedRoles;
+      let rolesLoaded = seedRoles.length > 0;
+      let rolesFetchPromise = null;
+
+      function loadRolesFromApiOnce() {
+        if (rolesFetchPromise) return rolesFetchPromise;
+        rolesFetchPromise = fetch("{{ url_for('api_guild_roles') }}")
+          .then((res) => {
+            if (!res.ok) throw new Error("No se pudieron cargar los roles.");
+            return res.json();
+          })
+          .then((data) => {
+            if (Array.isArray(data) && data.length) {
+              allRoles = data;
+            }
+            rolesLoaded = true;
+          })
+          .catch(() => {
+            allRoles = seedRoles;
+            rolesLoaded = seedRoles.length > 0;
+          });
+        return rolesFetchPromise;
+      }
+
+      function roleById(id) {
+        return allRoles.find((r) => r.id === id);
+      }
+
+      function initPicker(container) {
+        const hiddenInput = container.querySelector(".role-picker-hidden");
+        const tagsEl = container.querySelector(".role-picker-tags");
+        const addBtn = container.querySelector(".role-picker-add-btn");
+        const popover = container.querySelector(".role-picker-popover");
+        const searchInput = container.querySelector(".role-picker-search");
+        const resultsEl = container.querySelector(".role-picker-results");
+        const idInput = container.querySelector(".role-picker-id-input");
+        const idAddBtn = container.querySelector(".role-picker-id-btn");
+        const tabs = container.querySelectorAll(".role-picker-tab");
+        const panels = container.querySelectorAll(".role-picker-panel");
+
+        let selected = [];
+        try {
+          selected = JSON.parse(container.dataset.selected || "[]");
+        } catch (e) {
+          selected = [];
+        }
+
+        function renderBadges() {
+          tagsEl.querySelectorAll(".role-badge").forEach((el) => el.remove());
+          selected.forEach((id) => {
+            const role = roleById(id);
+            const badge = document.createElement("span");
+            badge.className = "role-badge";
+
+            const dot = document.createElement("span");
+            dot.className = "dot";
+            dot.style.background = role ? role.color : "#99aab5";
+
+            const label = document.createElement("span");
+            label.textContent = role ? `@${role.name}` : `ID: ${id}`;
+
+            const removeBtn = document.createElement("button");
+            removeBtn.type = "button";
+            removeBtn.innerHTML = "&times;";
+            removeBtn.title = "Quitar rol";
+            removeBtn.addEventListener("click", () => {
+              selected = selected.filter((sid) => sid !== id);
+              syncAndRender();
+            });
+
+            badge.appendChild(dot);
+            badge.appendChild(label);
+            badge.appendChild(removeBtn);
+            tagsEl.insertBefore(badge, addBtn);
+          });
+        }
+
+        function renderResults() {
+          const term = searchInput.value.trim().toLowerCase();
+          resultsEl.innerHTML = "";
+
+          if (!rolesLoaded) {
+            resultsEl.innerHTML = '<p class="role-picker-empty">Cargando roles…</p>';
+            return;
+          }
+
+          const filtered = allRoles.filter((r) => r.name.toLowerCase().includes(term));
+
+          if (!filtered.length) {
+            resultsEl.innerHTML = '<p class="role-picker-empty">No se encontraron roles.</p>';
+            return;
+          }
+
+          filtered.forEach((role) => {
+            const opt = document.createElement("div");
+            opt.className = "role-picker-option" + (selected.includes(role.id) ? " selected" : "");
+
+            const dot = document.createElement("span");
+            dot.className = "dot";
+            dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${role.color};flex-shrink:0;`;
+
+            const label = document.createElement("span");
+            label.textContent = `@${role.name}`;
+
+            opt.appendChild(dot);
+            opt.appendChild(label);
+            opt.addEventListener("click", () => {
+              toggleRole(role.id);
+              renderResults();
+            });
+            resultsEl.appendChild(opt);
+          });
+        }
+
+        function toggleRole(id) {
+          selected = selected.includes(id)
+            ? selected.filter((sid) => sid !== id)
+            : [...selected, id];
+          syncAndRender();
+        }
+
+        function syncAndRender() {
+          hiddenInput.value = selected.join(",");
+          renderBadges();
+          // Notifica al gestor global de cambios sin guardar (evento burbujeante)
+          hiddenInput.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        // Hook usado por el gestor global de cambios sin guardar para
+        // re-sincronizar las badges visuales tras restaurar el input oculto.
+        container.__syncFromHidden = () => {
+          selected = hiddenInput.value.split(",").filter(Boolean);
+          renderBadges();
+          renderResults();
+        };
+
+        addBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const willOpen = popover.classList.contains("hidden");
+          // Cierra cualquier otro popover abierto en la página
+          document.querySelectorAll(".role-picker-popover").forEach((p) => {
+            if (p !== popover) p.classList.add("hidden");
+          });
+          popover.classList.toggle("hidden");
+          if (willOpen) {
+            loadRolesFromApiOnce().then(() => {
+              renderResults();
+              renderBadges();
+            });
+            searchInput.focus();
+          }
+        });
+
+        document.addEventListener("click", (e) => {
+          if (!container.contains(e.target)) {
+            popover.classList.add("hidden");
+          }
+        });
+
+        searchInput.addEventListener("input", renderResults);
+
+        idAddBtn.addEventListener("click", () => {
+          const id = idInput.value.trim();
+          if (!/^\d{15,25}$/.test(id)) {
+            idInput.classList.add("input-error");
+            return;
+          }
+          idInput.classList.remove("input-error");
+          if (!selected.includes(id)) {
+            selected.push(id);
+            syncAndRender();
+          }
+          idInput.value = "";
+        });
+
+        idInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            idAddBtn.click();
+          }
+        });
+
+        tabs.forEach((tab) => {
+          tab.addEventListener("click", () => {
+            tabs.forEach((t) => t.classList.remove("active"));
+            tab.classList.add("active");
+            panels.forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== tab.dataset.tab));
+          });
+        });
+
+        renderBadges();
+        renderResults();
+      }
+
+      instances.forEach(initPicker);
+    })();
+  </script>
+
+  <!-- Barra flotante de cambios sin guardar -->
+  <div id="unsaved-bar">
+    <span class="unsaved-text">⚠️ Tienes cambios sin guardar en esta sección</span>
+    <div class="unsaved-actions">
+      <button type="button" id="unsaved-cancel-btn" class="btn-discard-bar">Cancelar</button>
+      <button type="button" id="unsaved-save-btn" class="btn-save-bar">Guardar cambios</button>
+    </div>
+  </div>
+
+  <!-- Modal de bloqueo de navegación -->
+  <div id="nav-guard-modal">
+    <div class="modal-box">
+      <h3>Tienes cambios sin guardar</h3>
+      <p>¿Quieres guardarlos antes de salir? Si continúas sin guardar, perderás los cambios realizados en esta sección.</p>
+      <div class="modal-actions">
+        <button type="button" id="nav-guard-save" class="btn-modal-primary">Guardar</button>
+        <button type="button" id="nav-guard-discard" class="btn-modal-danger">Descartar y salir</button>
+        <button type="button" id="nav-guard-stay" class="btn-modal-ghost">Permanecer aquí</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ------------------------------------------------------------------
+    // Gestor global de cambios sin guardar (estilo Discord / Shopify):
+    // detecta cambios en cualquier form[data-autosave], muestra la barra
+    // flotante, permite guardar todo vía AJAX o descartar/restaurar, y
+    // bloquea la navegación (interna y cierre de pestaña) si hay cambios.
+    // ------------------------------------------------------------------
+    (function unsavedChangesManager() {
+      const forms = Array.from(document.querySelectorAll("form[data-autosave]"));
+      if (!forms.length) return;
+
+      const bar = document.getElementById("unsaved-bar");
+      const saveBtn = document.getElementById("unsaved-save-btn");
+      const cancelBtn = document.getElementById("unsaved-cancel-btn");
+      const modal = document.getElementById("nav-guard-modal");
+      const modalSave = document.getElementById("nav-guard-save");
+      const modalDiscard = document.getElementById("nav-guard-discard");
+      const modalStay = document.getElementById("nav-guard-stay");
+
+      let isDirty = false;
+      let isRestoring = false;
+      let pendingHref = null;
+      const snapshots = new Map();
+
+      function captureSnapshot(form) {
+        snapshots.set(form, new FormData(form));
+      }
+      forms.forEach(captureSnapshot);
+
+      // Evita que el envío nativo del form recargue la página: el guardado
+      // se hace siempre a través de la barra flotante (AJAX).
+      forms.forEach((form) => {
+        form.addEventListener("submit", (e) => e.preventDefault());
+      });
+
+      function setDirty(state) {
+        isDirty = state;
+        bar.classList.toggle("show", isDirty);
+      }
+
+      function markDirty() {
+        if (isRestoring) return;
+        setDirty(true);
+      }
+
+      forms.forEach((form) => {
+        form.addEventListener("input", markDirty);
+        form.addEventListener("change", markDirty);
+      });
+
+      function restoreSnapshot(form) {
+        const data = snapshots.get(form);
+        if (!data) return;
+        isRestoring = true;
+
+        form.querySelectorAll("input, select, textarea").forEach((el) => {
+          if (!el.name) return;
+          if (el.type === "checkbox") {
+            el.checked = data.has(el.name);
+          } else {
+            el.value = data.has(el.name) ? data.get(el.name) : "";
+          }
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        // Re-sincroniza las badges visuales de los selectores de roles
+        form.querySelectorAll(".role-picker-instance").forEach((container) => {
+          if (typeof container.__syncFromHidden === "function") {
+            container.__syncFromHidden();
+          }
+        });
+
+        isRestoring = false;
+      }
+
+      function setBarSaving(saving) {
+        saveBtn.disabled = saving;
+        saveBtn.innerHTML = saving
+          ? '<span class="spinner"></span> Guardando…'
+          : "Guardar cambios";
+      }
+
+      async function saveAllForms() {
+        setBarSaving(true);
+        try {
+          await Promise.all(
+            forms.map((form) => {
+              const data = new FormData(form);
+              return fetch(form.action, { method: "POST", body: data }).then((res) => {
+                if (!res.ok) throw new Error("save failed: " + form.action);
+                return res;
+              });
+            })
+          );
+          forms.forEach(captureSnapshot);
+          setDirty(false);
+          return true;
+        } catch (err) {
+          alert("Ocurrió un error al guardar los cambios. Inténtalo de nuevo.");
+          return false;
+        } finally {
+          setBarSaving(false);
+        }
+      }
+
+      saveBtn.addEventListener("click", () => { saveAllForms(); });
+
+      cancelBtn.addEventListener("click", () => {
+        forms.forEach(restoreSnapshot);
+        setDirty(false);
+      });
+
+      // Bloqueo de navegación interna (enlaces del menú/sidebar)
+      document.addEventListener("click", (e) => {
+        const link = e.target.closest("a[href]");
+        if (!link) return;
+        if (link.target === "_blank") return;
+        if (link.href.startsWith("javascript:")) return;
+        if (!isDirty) return;
+        e.preventDefault();
+        pendingHref = link.href;
+        modal.classList.add("show");
+      });
+
+      modalStay.addEventListener("click", () => {
+        modal.classList.remove("show");
+        pendingHref = null;
+      });
+
+      modalDiscard.addEventListener("click", () => {
+        modal.classList.remove("show");
+        const href = pendingHref;
+        pendingHref = null;
+        setDirty(false);
+        if (href) window.location.href = href;
+      });
+
+      modalSave.addEventListener("click", async () => {
+        const ok = await saveAllForms();
+        if (ok) {
+          modal.classList.remove("show");
+          if (pendingHref) {
+            const href = pendingHref;
+            pendingHref = null;
+            window.location.href = href;
+          }
+        }
+      });
+
+      // Bloqueo de cierre/recarga de pestaña
+      window.addEventListener("beforeunload", (e) => {
+        if (!isDirty) return;
+        e.preventDefault();
+        e.returnValue = "";
+      });
+    })();
+  </script>
+</body>
+</html>
