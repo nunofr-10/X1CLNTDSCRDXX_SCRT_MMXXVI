@@ -3,6 +3,7 @@ import secrets
 import hmac
 import hashlib
 import json
+from datetime import datetime, timezone
 from functools import wraps
 from urllib.parse import urlencode
 
@@ -2199,14 +2200,14 @@ def ensure_twitch_eventsub_subscriptions(config, broadcaster_id):
     return subscription_ids, errors
 
 
-def send_discord_log_message(bot_token, channel_id, content):
+def send_discord_log_embed(bot_token, channel_id, embed):
     """
-    Envía un mensaje de texto simple al canal de Discord de un cliente
-    usando su propio bot_token, vía la API REST de Discord directamente
-    (igual patrón que save_panel() para tickets) -- no depende de que el
-    proceso del bot (discord.py) esté corriendo ni de discord.py en
-    absoluto, así que funciona igual de bien llamado desde una vista con
-    sesión que desde el webhook de EventSub, que no tiene sesión Flask.
+    Envía UN embed al canal de Discord de un cliente usando su propio
+    bot_token, vía la API REST de Discord directamente (igual patrón que
+    save_panel() para tickets) -- no depende de que el proceso del bot
+    (discord.py) esté corriendo ni de discord.py en absoluto, así que
+    funciona igual de bien llamado desde una vista con sesión que desde el
+    webhook de EventSub, que no tiene sesión Flask.
     """
     resp = requests.post(
         f"{DISCORD_API}/channels/{channel_id}/messages",
@@ -2214,54 +2215,116 @@ def send_discord_log_message(bot_token, channel_id, content):
             "Authorization": f"Bot {bot_token}",
             "Content-Type": "application/json",
         },
-        json={"content": content},
+        json={"embeds": [embed]},
         timeout=10,
     )
     resp.raise_for_status()
 
 
-def _twitch_moderation_alert_text(sub_type, event):
+# Colores de cada tipo de sanción (enteros RGB, formato que espera la API de
+# Discord para "color" dentro de un embed).
+TWITCH_SANCTION_COLORS = {
+    "ban": 0xED4245,             # rojo
+    "timeout": 0xF5A623,         # naranja
+    "warning": 0xFAA61A,         # ámbar
+    "delete_message": 0x5865F2,  # azul discord
+}
+
+TWITCH_SANCTION_TITLES = {
+    "ban": "🔨 Baneo permanente en Twitch",
+    "timeout": "⏱️ Timeout en Twitch",
+    "warning": "⚠️ Advertencia en Twitch",
+    "delete_message": "🗑️ Mensaje borrado en Twitch",
+}
+
+
+def _twitch_moderation_embed(sub_type, event, broadcaster_display_name=""):
     """
-    Construye el texto del aviso de Discord a partir del tipo de
-    suscripción EventSub y su payload, y devuelve (filter_key, texto).
-    filter_key es la clave de config.twitch.filters que hay que comprobar
-    antes de enviar nada ("ban" / "timeout" / "warning" / "delete_message").
+    Construye el embed de Discord a partir del tipo de suscripción EventSub
+    y su payload completo, mostrando TODOS los campos que Twitch envía para
+    ese tipo de evento (no solo usuario/motivo). Devuelve (filter_key,
+    embed) -- filter_key es la clave de config.twitch.filters que hay que
+    comprobar antes de enviar nada ("ban" / "timeout" / "warning" /
+    "delete_message"). Devuelve (None, None) si el tipo no se reconoce.
+
+    Campos disponibles por tipo (documentación oficial de Twitch,
+    eventsub-subscription-types):
+      - channel.ban: user_id/login/name, moderator_user_id/login/name,
+        reason, banned_at, ends_at, is_permanent.
+      - channel.warning.send: user_id/login/name, moderator_user_id/login/
+        name, reason, chat_rules_cited (lista).
+      - channel.chat.message_delete: SOLO target_user_id/login/name y
+        message_id -- Twitch no manda ni moderador ni motivo ni el
+        contenido del mensaje borrado (limitación de privacidad de su API,
+        no un recorte nuestro).
     """
-    moderator = event.get("moderator_user_name") or "un moderador"
-    user = event.get("user_name") or event.get("user_login") or "un usuario"
+    user = event.get("user_name") or event.get("user_login") or "Desconocido"
+    moderator = event.get("moderator_user_name") or event.get("moderator_user_login") or "Desconocido"
 
     if sub_type == "channel.ban":
-        if event.get("is_permanent"):
-            return "ban", f"🔨 **{moderator}** ha baneado permanentemente a **{user}** en Twitch."
-        ends_at = event.get("ends_at") or ""
-        return (
-            "timeout",
-            f"⏱️ **{moderator}** ha silenciado temporalmente a **{user}** en Twitch"
-            + (f" (hasta {ends_at})" if ends_at else "")
-            + ".",
-        )
+        is_permanent = bool(event.get("is_permanent"))
+        filter_key = "ban" if is_permanent else "timeout"
+        fields = [
+            {"name": "Usuario", "value": user, "inline": True},
+            {"name": "Moderador", "value": moderator, "inline": True},
+            {"name": "Tipo", "value": "Permanente" if is_permanent else "Temporal", "inline": True},
+            {"name": "Motivo", "value": event.get("reason") or "Sin motivo especificado", "inline": False},
+        ]
+        if not is_permanent and event.get("ends_at"):
+            fields.append({"name": "Finaliza", "value": event["ends_at"], "inline": True})
+        if event.get("banned_at"):
+            fields.append({"name": "Fecha", "value": event["banned_at"], "inline": True})
+        embed = {
+            "title": TWITCH_SANCTION_TITLES[filter_key],
+            "color": TWITCH_SANCTION_COLORS[filter_key],
+            "fields": fields,
+        }
+        return filter_key, embed
 
     if sub_type == "channel.warning.send":
-        reason = event.get("reason") or ""
-        texto = f"⚠️ **{moderator}** ha enviado una advertencia a **{user}** en Twitch."
-        if reason:
-            texto += f" Motivo: {reason}"
-        return "warning", texto
+        rules = event.get("chat_rules_cited") or []
+        fields = [
+            {"name": "Usuario", "value": user, "inline": True},
+            {"name": "Moderador", "value": moderator, "inline": True},
+            {"name": "Motivo", "value": event.get("reason") or "Sin motivo especificado", "inline": False},
+            {"name": "Reglas citadas", "value": ", ".join(rules) if rules else "Ninguna especificada", "inline": False},
+        ]
+        embed = {
+            "title": TWITCH_SANCTION_TITLES["warning"],
+            "color": TWITCH_SANCTION_COLORS["warning"],
+            "fields": fields,
+        }
+        return "warning", embed
 
     if sub_type == "channel.chat.message_delete":
-        return "delete_message", f"🗑️ Se ha borrado un mensaje de **{user}** en el chat de Twitch."
+        target = event.get("target_user_name") or event.get("target_user_login") or "Desconocido"
+        fields = [
+            {"name": "Usuario", "value": target, "inline": True},
+            {"name": "ID del mensaje", "value": f"`{event.get('message_id', 'desconocido')}`", "inline": True},
+            {
+                "name": "Nota",
+                "value": "Twitch no incluye el moderador ni el contenido del mensaje borrado en este evento.",
+                "inline": False,
+            },
+        ]
+        embed = {
+            "title": TWITCH_SANCTION_TITLES["delete_message"],
+            "color": TWITCH_SANCTION_COLORS["delete_message"],
+            "fields": fields,
+        }
+        return "delete_message", embed
 
-    return None, ""
+    return None, None
 
 
 def handle_twitch_eventsub_notification(sub_type, event):
     """
     Procesa UNA notificación de sanción ya verificada (firma HMAC correcta).
     Busca el bot/cliente dueño de ese broadcaster_id, respeta sus filtros
-    (twitch.filters) y, si corresponde, envía el aviso a su canal de
-    Discord (twitch.log_channel_id) con su propio bot_token -- todo
-    completamente aislado por cliente, nunca se mezclan datos de un cliente
-    con los de otro.
+    (twitch.filters) y, si corresponde, envía el aviso (como embed) a su
+    canal de Discord (twitch.log_channel_id) con su propio bot_token --
+    todo completamente aislado por cliente, nunca se mezclan datos de un
+    cliente con los de otro.
     """
     broadcaster_id = event.get("broadcaster_user_id")
     if not broadcaster_id or not mongo_ready():
@@ -2279,8 +2342,10 @@ def handle_twitch_eventsub_notification(sub_type, event):
     config = get_config(bot_id=bot_id)
     twitch_cfg = config.get("twitch", {})
 
-    filter_key, texto = _twitch_moderation_alert_text(sub_type, event)
-    if not filter_key or not texto:
+    filter_key, embed = _twitch_moderation_embed(
+        sub_type, event, twitch_cfg.get("broadcaster_display_name", "")
+    )
+    if not filter_key or not embed:
         return
 
     if not twitch_cfg.get("filters", {}).get(filter_key, True):
@@ -2290,9 +2355,13 @@ def handle_twitch_eventsub_notification(sub_type, event):
     if not log_channel_id:
         return  # No ha elegido todavía un canal de Discord para los logs.
 
+    broadcaster_label = twitch_cfg.get("broadcaster_display_name") or twitch_cfg.get("broadcaster_id", "")
+    embed["footer"] = {"text": f"Twitch · {broadcaster_label}" if broadcaster_label else "Twitch EventSub Logs"}
+    embed["timestamp"] = datetime.now(timezone.utc).isoformat()
+
     bot_token = active_bot_token(config)
     try:
-        send_discord_log_message(bot_token, log_channel_id, texto)
+        send_discord_log_embed(bot_token, log_channel_id, embed)
     except requests.RequestException as e:
         print(f"[WARN] No se pudo enviar el aviso de sanción de Twitch a Discord (bot_id={bot_id}): {e}")
 
