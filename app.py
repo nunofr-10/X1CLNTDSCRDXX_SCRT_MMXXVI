@@ -512,6 +512,15 @@ DEFAULT_TWITCH_CONFIG = {
     "broadcaster_id": "",
     "broadcaster_login": "",
     "broadcaster_display_name": "",
+    # ID/login de la cuenta de Twitch que hizo login por OAuth (la que
+    # realmente concedió los scopes a nuestra app). Es SIEMPRE la primera
+    # entrada de available_channels ("propio canal"). Es distinta de
+    # broadcaster_id cuando el cliente elige monitorizar un canal que
+    # modera en vez del suyo propio -- Twitch exige usar este ID (y no el
+    # del canal elegido) como moderator_user_id/user_id al crear las
+    # suscripciones EventSub, porque la autorización la dio esta cuenta.
+    "linked_user_id": "",
+    "linked_login": "",
     # Canales candidatos a monitorizar: el propio canal del streamer + los
     # canales donde su cuenta es moderadora (GET /helix/moderation/channels).
     # Se recalcula cada vez que (re)vincula la cuenta; alimenta el
@@ -972,6 +981,8 @@ def get_config(bot_id=None):
         "broadcaster_id": stored_twitch.get("broadcaster_id") or "",
         "broadcaster_login": stored_twitch.get("broadcaster_login") or "",
         "broadcaster_display_name": stored_twitch.get("broadcaster_display_name") or "",
+        "linked_user_id": stored_twitch.get("linked_user_id") or "",
+        "linked_login": stored_twitch.get("linked_login") or "",
         "available_channels": (
             list(stored_twitch.get("available_channels"))
             if isinstance(stored_twitch.get("available_channels"), list)
@@ -2093,19 +2104,38 @@ def fetch_twitch_channel_choices(client_id, access_token):
     return choices
 
 
-def _twitch_eventsub_condition(sub_type, broadcaster_id):
+def _twitch_eventsub_condition(sub_type, broadcaster_id, moderator_id):
     """
     Condition exigido por cada tipo de suscripción (ver
-    https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/). El
-    streamer autoriza con su propia cuenta de Twitch, así que actúa a la
-    vez como broadcaster, moderador y usuario de chat en las tres.
+    https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/).
+
+    IMPORTANTE: broadcaster_id es el canal que se está monitorizando (puede
+    ser el propio o uno que el cliente modera), mientras que moderator_id es
+    SIEMPRE la cuenta de Twitch que hizo login por OAuth y concedió los
+    scopes a nuestra app (twitch.linked_user_id). Cuando ambos coinciden
+    (monitorizas tu propio canal) da igual, pero si eliges un canal ajeno
+    que moderas, Twitch exige que moderator_user_id/user_id sea la cuenta
+    que realmente autorizó -- si se pone ahí el ID del broadcaster (que
+    nunca autorizó nada a esta app), Twitch responde "subscription missing
+    proper authorization".
+
+    "channel.ban" es un caso aparte: su condition oficial SOLO admite
+    broadcaster_user_id (no hay campo para indicar "qué moderador
+    autoriza"), así que Twitch únicamente puede validarlo contra un scope
+    channel:moderate concedido por el PROPIO broadcaster del canal. Si el
+    canal elegido no es el tuyo, esta suscripción en concreto seguirá
+    fallando con "missing proper authorization" aunque seas moderador --
+    es una limitación de la API de Twitch, no de este código. Para que
+    funcione, el streamer dueño de ese canal tendría que vincular también
+    su cuenta (aunque sea solo para autorizar, sin necesidad de usarla
+    activamente para nada más).
     """
     if sub_type == "channel.ban":
         return {"broadcaster_user_id": broadcaster_id}
     if sub_type == "channel.warning.send":
-        return {"broadcaster_user_id": broadcaster_id, "moderator_user_id": broadcaster_id}
+        return {"broadcaster_user_id": broadcaster_id, "moderator_user_id": moderator_id}
     if sub_type == "channel.chat.message_delete":
-        return {"broadcaster_user_id": broadcaster_id, "user_id": broadcaster_id}
+        return {"broadcaster_user_id": broadcaster_id, "user_id": moderator_id}
     raise ValueError(f"Tipo de suscripción EventSub no soportado: {sub_type}")
 
 
@@ -2177,13 +2207,19 @@ def ensure_twitch_eventsub_subscriptions(config, broadcaster_id):
             "Configura primero el Client ID y Client Secret de tu app de Twitch en esta página."
         )
 
+    # Cuenta que realmente autorizó los scopes (ver _twitch_eventsub_condition).
+    # Si por lo que sea no está guardada (vinculaciones antiguas, previas a
+    # este campo), usamos broadcaster_id como fallback -- es el comportamiento
+    # de antes, correcto solo cuando se monitoriza el propio canal.
+    moderator_id = config.get("twitch", {}).get("linked_user_id") or broadcaster_id
+
     app_token = get_twitch_app_access_token(client_id, client_secret)
 
     subscription_ids = {}
     errors = []
     for sub in TWITCH_EVENTSUB_SUBSCRIPTIONS:
         try:
-            condition = _twitch_eventsub_condition(sub["type"], broadcaster_id)
+            condition = _twitch_eventsub_condition(sub["type"], broadcaster_id, moderator_id)
             sub_id = create_twitch_eventsub_subscription(
                 app_token, client_id, sub["type"], sub["version"], condition
             )
@@ -2586,6 +2622,9 @@ def twitch_oauth_callback():
     # lista) como opción por defecto.
     previous_broadcaster_id = config.get("twitch", {}).get("broadcaster_id", "")
     selected = next((c for c in choices if c["id"] == previous_broadcaster_id), choices[0])
+    # choices[0] es SIEMPRE el canal propio (ver fetch_twitch_channel_choices),
+    # es decir, la cuenta que acaba de autorizar los scopes vía OAuth.
+    own_account = choices[0]
 
     try:
         save_fields(
@@ -2596,6 +2635,8 @@ def twitch_oauth_callback():
                 "twitch.broadcaster_id": selected["id"],
                 "twitch.broadcaster_login": selected["login"],
                 "twitch.broadcaster_display_name": selected["display_name"],
+                "twitch.linked_user_id": own_account["id"],
+                "twitch.linked_login": own_account["login"],
             }
         )
     except PyMongoError as e:
@@ -2610,11 +2651,19 @@ def twitch_oauth_callback():
         return redirect(url_for("twitch_logs_config"))
 
     if errors:
-        flash(
+        msg = (
             "Cuenta de Twitch vinculada. Algunos avisos no se pudieron activar: "
-            + "; ".join(errors),
-            "error",
+            + "; ".join(errors)
         )
+        if selected["id"] != own_account["id"] and any(e.startswith("channel.ban") for e in errors):
+            msg += (
+                " — el aviso de baneos/timeouts (channel.ban) solo puede activarse si el "
+                f"propio dueño del canal ({selected['display_name']}) vincula también su "
+                "cuenta de Twitch; ser moderador no es suficiente para ese tipo de aviso "
+                "en concreto (limitación de Twitch, no del panel). El resto de avisos "
+                "(advertencias y mensajes borrados) sí funcionan solo con tu cuenta."
+            )
+        flash(msg, "error")
     else:
         flash(
             f"✅ Cuenta de Twitch vinculada. Monitorizando el canal de "
@@ -2664,12 +2713,21 @@ def select_twitch_channel():
         flash(f"Canal actualizado, pero no se pudieron activar los avisos: {e}", "error")
         return redirect(url_for("twitch_logs_config"))
 
+    is_own_channel = selected["id"] == config.get("twitch", {}).get("linked_user_id")
     if errors:
-        flash(
+        msg = (
             f"Canal actualizado a {selected['display_name']}. Algunos avisos no se pudieron activar: "
-            + "; ".join(errors),
-            "error",
+            + "; ".join(errors)
         )
+        if not is_own_channel and any(e.startswith("channel.ban") for e in errors):
+            msg += (
+                " — el aviso de baneos/timeouts (channel.ban) solo puede activarse si el "
+                f"propio dueño del canal ({selected['display_name']}) vincula también su "
+                "cuenta de Twitch; ser moderador no es suficiente para ese tipo de aviso "
+                "en concreto (limitación de Twitch, no del panel). El resto de avisos "
+                "(advertencias y mensajes borrados) sí funcionan solo con tu cuenta."
+            )
+        flash(msg, "error")
     else:
         flash(f"✅ Ahora se monitoriza el canal de {selected['display_name']}.", "success")
 
