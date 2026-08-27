@@ -212,6 +212,31 @@
           </button>
         </form>
 
+        <!-- Aviso de "bot conectado con el dashboard": se envía SIEMPRE con
+             el bot_token propio de este cliente (el admin no tiene acceso
+             directo a su servidor), a un canal que el admin elige aquí. -->
+        <div class="border-t border-border pt-4">
+          {% if bot.notify_channels %}
+            <form method="POST" action="{{ url_for('admin_notify_bot_connected', bot_id=bot.id) }}"
+                  class="flex items-center gap-3 flex-wrap">
+              <select name="channel_id"
+                      class="bg-card border border-border rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-accent">
+                {% for c in bot.notify_channels %}
+                  <option value="{{ c.id }}">#{{ c.name }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit"
+                      class="bg-ok/10 hover:bg-ok/20 border border-ok/40 text-ok text-sm font-semibold px-4 py-2 rounded-lg whitespace-nowrap">
+                📡 Enviar aviso de conexión (embed verde)
+              </button>
+            </form>
+          {% elif bot.guild_id %}
+            <p class="text-xs text-muted">No se pudieron cargar los canales de este servidor (¿el bot está invitado y con permisos?).</p>
+          {% else %}
+            <p class="text-xs text-muted">Este cliente todavía no ha elegido un servidor -- no se puede enviar ningún aviso.</p>
+          {% endif %}
+        </div>
+
         {% if bot.discord_user_id %}
           <form method="POST" action="{{ url_for('admin_update_client_access', bot_id=bot.id) }}"
                 class="flex items-center justify-between gap-4 flex-wrap border-t border-border pt-4">
