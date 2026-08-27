@@ -349,10 +349,11 @@ TWITCH_HELIX_API = "https://api.twitch.tv/helix"
 # revisa https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/
 # antes de tocar esta lista.
 TWITCH_OAUTH_SCOPES = [
-    "channel:moderate",          # channel.ban (bans y timeouts)
-    "moderator:manage:warnings", # channel.warning.send (advertencias)
-    "user:read:chat",            # channel.chat.message_delete (borrados)
-    "channel:bot",               # channel.chat.message_delete (lado broadcaster)
+    "channel:moderate",              # channel.ban (bans y timeouts)
+    "moderator:manage:warnings",     # channel.warning.send (advertencias)
+    "user:read:chat",                # channel.chat.message_delete (borrados)
+    "channel:bot",                   # channel.chat.message_delete (lado broadcaster)
+    "user:read:moderated_channels",  # listar los canales que el usuario modera (selector de canal)
 ]
 
 # Tipos de suscripción EventSub que crea /twitch/oauth/callback, y a qué
@@ -500,6 +501,13 @@ DEFAULT_TWITCH_CONFIG = {
     "live": dict(DEFAULT_TWITCH_LIVE),
     "credentials": dict(DEFAULT_TWITCH_CREDENTIALS),
     "broadcaster_id": "",
+    "broadcaster_login": "",
+    "broadcaster_display_name": "",
+    # Canales candidatos a monitorizar: el propio canal del streamer + los
+    # canales donde su cuenta es moderadora (GET /helix/moderation/channels).
+    # Se recalcula cada vez que (re)vincula la cuenta; alimenta el
+    # desplegable de selección de canal en Logs Twitch.
+    "available_channels": [],
     "access_token": "",
     "refresh_token": "",
     "log_channel_id": "",
@@ -953,6 +961,13 @@ def get_config(bot_id=None):
         # todavía están cifrados en este punto -- se descifran más abajo
         # junto al resto de SENSITIVE_CONFIG_PATHS.
         "broadcaster_id": stored_twitch.get("broadcaster_id") or "",
+        "broadcaster_login": stored_twitch.get("broadcaster_login") or "",
+        "broadcaster_display_name": stored_twitch.get("broadcaster_display_name") or "",
+        "available_channels": (
+            list(stored_twitch.get("available_channels"))
+            if isinstance(stored_twitch.get("available_channels"), list)
+            else []
+        ),
         "access_token": stored_twitch.get("access_token") or "",
         "refresh_token": stored_twitch.get("refresh_token") or "",
         "log_channel_id": stored_twitch.get("log_channel_id") or "",
@@ -2017,6 +2032,58 @@ def get_twitch_app_access_token(client_id, client_secret):
     return resp.json()["access_token"]
 
 
+def fetch_twitch_channel_choices(client_id, access_token):
+    """
+    Devuelve la lista de canales candidatos a monitorizar: el propio canal
+    del streamer autenticado (siempre primero) + los canales donde su
+    cuenta es moderadora (GET /helix/moderation/channels, requiere el scope
+    "user:read:moderated_channels"). Cada elemento es
+    {"id", "login", "display_name"}.
+
+    Si la llamada a moderation/channels falla (por ejemplo, una cuenta
+    vinculada antes de añadir ese scope) no se rompe la vinculación entera:
+    simplemente se devuelve solo el canal propio.
+    """
+    headers = {"Client-Id": client_id, "Authorization": f"Bearer {access_token}"}
+
+    users_resp = requests.get(f"{TWITCH_HELIX_API}/users", headers=headers, timeout=10)
+    users_resp.raise_for_status()
+    users_data = users_resp.json().get("data") or []
+    if not users_data:
+        raise ValueError("Twitch no devolvió información del usuario autenticado.")
+
+    own = users_data[0]
+    choices = [{
+        "id": own["id"],
+        "login": own.get("login", ""),
+        "display_name": own.get("display_name") or own.get("login", ""),
+    }]
+    seen_ids = {own["id"]}
+
+    try:
+        mod_resp = requests.get(
+            f"{TWITCH_HELIX_API}/moderation/channels",
+            headers=headers,
+            params={"user_id": own["id"], "first": 100},
+            timeout=10,
+        )
+        mod_resp.raise_for_status()
+        for ch in mod_resp.json().get("data") or []:
+            ch_id = ch.get("broadcaster_id")
+            if not ch_id or ch_id in seen_ids:
+                continue
+            seen_ids.add(ch_id)
+            choices.append({
+                "id": ch_id,
+                "login": ch.get("broadcaster_login", ""),
+                "display_name": ch.get("broadcaster_name") or ch.get("broadcaster_login", ""),
+            })
+    except requests.RequestException as e:
+        print(f"[WARN] No se pudieron obtener los canales moderados de Twitch: {e}")
+
+    return choices
+
+
 def _twitch_eventsub_condition(sub_type, broadcaster_id):
     """
     Condition exigido por cada tipo de suscripción (ver
@@ -2234,20 +2301,18 @@ def twitch_oauth_login():
     """
     Paso 1 de la vinculación de la cuenta de Twitch del cliente: lo manda a
     autorizar en Twitch los scopes necesarios para las 3 suscripciones
-    EventSub de sanciones. Es una acción del módulo "Logs Twitch"
-    (twitch_logs), NO del módulo "Twitch" de directos -- por eso exige la
-    licencia de twitch_logs, aunque el Client ID/Secret que usa se
-    configure en la página de Twitch (infraestructura técnica compartida,
-    no licencia). Requiere que el cliente ya haya guardado ese Client ID
-    -- exactamente igual que Discord: el login autentica, nunca crea ni
-    vincula nada por sí solo hasta que el cliente confirma en la pantalla
-    de autorización de Twitch.
+    EventSub de sanciones, incluido el scope para listar los canales que
+    modera. Es una acción del módulo "Logs Twitch" (twitch_logs) -- el
+    Client ID/Secret que usa se configura en esta misma página. Requiere
+    que el cliente ya lo haya guardado -- exactamente igual que Discord: el
+    login autentica, nunca crea ni vincula nada por sí solo hasta que el
+    cliente confirma en la pantalla de autorización de Twitch.
     """
     config = safe_get_config()
     client_id = config.get("twitch", {}).get("credentials", {}).get("client_id", "")
     if not client_id:
         flash(
-            "Configura primero el Client ID de tu app de Twitch en la página de Twitch antes de vincular la cuenta.",
+            "Configura primero el Client ID de tu app de Twitch antes de vincular la cuenta.",
             "error",
         )
         return redirect(url_for("twitch_logs_config"))
@@ -2271,8 +2336,11 @@ def twitch_oauth_callback():
     """
     Paso 2: Twitch redirige aquí con un "code" tras la autorización del
     streamer. Intercambia el code por access_token/refresh_token, obtiene
-    el broadcaster_id real (GET /helix/users), cifra y guarda todo, y
-    finalmente crea las 3 suscripciones EventSub para ese broadcaster_id.
+    el canal propio y los canales que modera (GET /helix/users +
+    /helix/moderation/channels), cifra y guarda todo, y finalmente crea las
+    3 suscripciones EventSub para el canal seleccionado (el propio por
+    defecto -- el cliente puede cambiarlo luego con el desplegable de
+    "Logs Twitch" sin tener que volver a vincular la cuenta).
     """
     code = request.args.get("code")
     state = request.args.get("state")
@@ -2293,7 +2361,7 @@ def twitch_oauth_callback():
     client_secret = credentials.get("client_secret", "")
     if not client_id or not client_secret:
         flash(
-            "Configura primero el Client ID y Client Secret de tu app de Twitch en la página de Twitch.",
+            "Configura primero el Client ID y Client Secret de tu app de Twitch.",
             "error",
         )
         return redirect(url_for("twitch_logs_config"))
@@ -2319,28 +2387,31 @@ def twitch_oauth_callback():
         return redirect(url_for("twitch_logs_config"))
 
     try:
-        users_resp = requests.get(
-            f"{TWITCH_HELIX_API}/users",
-            headers={"Client-Id": client_id, "Authorization": f"Bearer {access_token}"},
-            timeout=10,
-        )
-        users_resp.raise_for_status()
-        users_data = users_resp.json().get("data") or []
-        broadcaster_id = users_data[0]["id"] if users_data else ""
+        choices = fetch_twitch_channel_choices(client_id, access_token)
     except (requests.RequestException, ValueError, KeyError, IndexError) as e:
-        flash(f"No se pudo obtener tu ID de canal de Twitch: {e}", "error")
+        flash(f"No se pudo obtener tu(s) canal(es) de Twitch: {e}", "error")
         return redirect(url_for("twitch_logs_config"))
 
-    if not broadcaster_id:
-        flash("Twitch no devolvió un ID de canal válido.", "error")
+    if not choices:
+        flash("Twitch no devolvió ningún canal válido.", "error")
         return redirect(url_for("twitch_logs_config"))
+
+    # Si ya había un canal elegido antes y sigue siendo una opción válida, se
+    # mantiene (revincular/renovar permisos no debe cambiar el canal
+    # monitorizado). Si no, se usa el canal propio (siempre el primero de la
+    # lista) como opción por defecto.
+    previous_broadcaster_id = config.get("twitch", {}).get("broadcaster_id", "")
+    selected = next((c for c in choices if c["id"] == previous_broadcaster_id), choices[0])
 
     try:
         save_fields(
             {
-                "twitch.broadcaster_id": broadcaster_id,
                 "twitch.access_token": encrypt_secret(access_token),
                 "twitch.refresh_token": encrypt_secret(refresh_token),
+                "twitch.available_channels": choices,
+                "twitch.broadcaster_id": selected["id"],
+                "twitch.broadcaster_login": selected["login"],
+                "twitch.broadcaster_display_name": selected["display_name"],
             }
         )
     except PyMongoError as e:
@@ -2349,7 +2420,7 @@ def twitch_oauth_callback():
 
     config = safe_get_config()  # recarga ya con broadcaster_id/credenciales frescas
     try:
-        _, errors = ensure_twitch_eventsub_subscriptions(config, broadcaster_id)
+        _, errors = ensure_twitch_eventsub_subscriptions(config, selected["id"])
     except ValueError as e:
         flash(f"Cuenta de Twitch vinculada, pero no se pudieron activar los avisos: {e}", "error")
         return redirect(url_for("twitch_logs_config"))
@@ -2361,7 +2432,62 @@ def twitch_oauth_callback():
             "error",
         )
     else:
-        flash("✅ Cuenta de Twitch vinculada y logs de sanciones activados.", "success")
+        flash(
+            f"✅ Cuenta de Twitch vinculada. Monitorizando el canal de "
+            f"{selected['display_name']}. Puedes cambiarlo abajo si quieres.",
+            "success",
+        )
+
+    return redirect(url_for("twitch_logs_config"))
+
+
+@app.route("/twitch/logs/select-channel", methods=["POST"])
+@requires_module("twitch_logs")
+def select_twitch_channel():
+    """
+    Cambia qué canal de Twitch (propio o uno de los que modera el usuario)
+    se monitoriza, sin tener que volver a pasar por el OAuth completo. Solo
+    acepta un broadcaster_id que ya esté en twitch.available_channels (la
+    lista construida en el último login/relink) -- nunca un ID arbitrario
+    del formulario, para no poder suscribirse a canales ajenos.
+    """
+    config = safe_get_config()
+    twitch_cfg = config.get("twitch", {})
+    choices = twitch_cfg.get("available_channels", [])
+
+    chosen_id = request.form.get("broadcaster_id", "").strip()
+    selected = next((c for c in choices if c["id"] == chosen_id), None)
+    if not selected:
+        flash("Selecciona un canal válido de la lista.", "error")
+        return redirect(url_for("twitch_logs_config"))
+
+    try:
+        save_fields(
+            {
+                "twitch.broadcaster_id": selected["id"],
+                "twitch.broadcaster_login": selected["login"],
+                "twitch.broadcaster_display_name": selected["display_name"],
+            }
+        )
+    except PyMongoError as e:
+        flash(f"No se pudo guardar el canal seleccionado: {e}", "error")
+        return redirect(url_for("twitch_logs_config"))
+
+    config = safe_get_config()
+    try:
+        _, errors = ensure_twitch_eventsub_subscriptions(config, selected["id"])
+    except ValueError as e:
+        flash(f"Canal actualizado, pero no se pudieron activar los avisos: {e}", "error")
+        return redirect(url_for("twitch_logs_config"))
+
+    if errors:
+        flash(
+            f"Canal actualizado a {selected['display_name']}. Algunos avisos no se pudieron activar: "
+            + "; ".join(errors),
+            "error",
+        )
+    else:
+        flash(f"✅ Ahora se monitoriza el canal de {selected['display_name']}.", "success")
 
     return redirect(url_for("twitch_logs_config"))
 
@@ -2491,14 +2617,12 @@ def save_twitch():
     normalizar el valor y extraer el nombre de canal real antes de
     consultar la API de Twitch.
 
-    "client_secret" es la credencial sensible de la app de Twitch de ESTE
-    cliente: se cifra con encrypt_secret() antes de guardarla (ver
-    SENSITIVE_CONFIG_PATHS). El campo del formulario llega vacío si el
-    usuario no ha tocado el campo de contraseña -- en ese caso se conserva
-    el secreto que ya hubiera guardado, en vez de borrarlo.
+    Las credenciales de la app de Twitch (Client ID/Secret) NO se tocan
+    aquí -- se gestionan exclusivamente desde el módulo "Logs Twitch"
+    (save_twitch_logs), aunque técnicamente vivan en el mismo campo
+    config.twitch.credentials.
     """
     form = request.form
-    config = safe_get_config()
 
     live = {
         "enabled": "live_enabled" in form,
@@ -2508,15 +2632,8 @@ def save_twitch():
         "mensaje": form.get("live_mensaje", "").strip(),
     }
 
-    new_client_secret = form.get("twitch_client_secret", "").strip()
-    current_client_secret = config.get("twitch", {}).get("credentials", {}).get("client_secret", "")
-    credentials = {
-        "client_id": form.get("twitch_client_id", "").strip(),
-        "client_secret": encrypt_secret(new_client_secret or current_client_secret),
-    }
-
     try:
-        save_fields({"twitch.live": live, "twitch.credentials": credentials})
+        save_fields({"twitch.live": live})
         flash("Configuración de Twitch guardada correctamente.", "success")
     except PyMongoError as e:
         flash(f"Error al guardar en MongoDB: {e}", "error")
@@ -2528,9 +2645,11 @@ def save_twitch():
 # Vista de configuración de "Logs Twitch" -- MÓDULO INDEPENDIENTE de
 # "Twitch" (notificaciones de directo): licencia propia
 # (allowed_modules.twitch_logs), switch propio (modules.twitch_logs) y
-# tarjeta propia en modules.html. Solo comparte con "twitch" el Client
-# ID/Secret de la app de Twitch del cliente (config.twitch.credentials),
-# que es infraestructura técnica de la API de Twitch, no una licencia.
+# tarjeta propia en modules.html. Las credenciales de la app de Twitch
+# (Client ID/Secret, config.twitch.credentials) se configuran EXCLUSIVAMENTE
+# aquí, aunque el campo en Mongo sea compartido con "twitch" -- son
+# necesarias para el OAuth y para crear las suscripciones EventSub, no
+# para las notificaciones de directo.
 # ------------------------------------------------------------------
 @app.route("/twitch/logs")
 @requires_module("twitch_logs")
@@ -2568,12 +2687,22 @@ def twitch_logs_config():
 @requires_module("twitch_logs")
 def save_twitch_logs():
     """
-    Guarda el canal de Discord y los toggles de filtro de los logs de
-    sanciones. NUNCA toca broadcaster_id/access_token/refresh_token/
-    subscription_ids -- esos los gestiona exclusivamente el flujo OAuth
-    (twitch_oauth_login/twitch_oauth_callback), nunca este formulario.
+    Guarda el canal de Discord, los toggles de filtro y las credenciales de
+    la app de Twitch (Client ID/Secret) de los logs de sanciones. NUNCA toca
+    broadcaster_id/broadcaster_login/broadcaster_display_name/
+    available_channels/access_token/refresh_token/subscription_ids -- esos
+    los gestiona exclusivamente el flujo OAuth y el selector de canal
+    (twitch_oauth_login/twitch_oauth_callback/select_twitch_channel), nunca
+    este formulario.
+
+    "client_secret" es la credencial sensible de la app de Twitch de ESTE
+    cliente: se cifra con encrypt_secret() antes de guardarla (ver
+    SENSITIVE_CONFIG_PATHS). El campo del formulario llega vacío si el
+    usuario no ha tocado el campo de contraseña -- en ese caso se conserva
+    el secreto que ya hubiera guardado, en vez de borrarlo.
     """
     form = request.form
+    config = safe_get_config()
 
     log_channel_id = form.get("twitch_log_channel_id", "").strip()
     filters = {
@@ -2583,8 +2712,19 @@ def save_twitch_logs():
         "delete_message": "twitch_filter_delete_message" in form,
     }
 
+    new_client_secret = form.get("twitch_client_secret", "").strip()
+    current_client_secret = config.get("twitch", {}).get("credentials", {}).get("client_secret", "")
+    credentials = {
+        "client_id": form.get("twitch_client_id", "").strip(),
+        "client_secret": encrypt_secret(new_client_secret or current_client_secret),
+    }
+
     try:
-        save_fields({"twitch.log_channel_id": log_channel_id, "twitch.filters": filters})
+        save_fields({
+            "twitch.log_channel_id": log_channel_id,
+            "twitch.filters": filters,
+            "twitch.credentials": credentials,
+        })
         flash("Configuración de logs de Twitch guardada correctamente.", "success")
     except PyMongoError as e:
         flash(f"Error al guardar en MongoDB: {e}", "error")
