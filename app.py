@@ -3173,18 +3173,34 @@ def admin_panel():
         allowed = doc.get("allowed_modules")
         if not isinstance(allowed, dict):
             allowed = {}
+
+        # Canales del servidor de ESTE cliente, para el selector del aviso
+        # de "bot conectado" -- se usa SIEMPRE el bot_token propio de este
+        # cliente (nunca el del admin), porque el mensaje tiene que salir
+        # literalmente desde su bot, que es el que está en su servidor.
+        guild_id = doc.get("guild_id") or ""
+        notify_channels = []
+        if guild_id:
+            try:
+                bot_token_for_notify = decrypt_secret(doc.get("bot_token")) or DISCORD_BOT_TOKEN
+                notify_channels = fetch_guild_channels(guild_id, bot_token_for_notify, types=(0, 5)) or []
+            except Exception as e:
+                print(f"[WARN] admin_panel() no se pudieron cargar canales de {doc.get('_id')}: {e}")
+                notify_channels = []
+
         bots.append(
             {
                 "id": doc.get("_id"),
                 "bot_name": doc.get("bot_name") or "",
                 "discord_user_id": doc.get("discord_user_id") or "",
-                "guild_id": doc.get("guild_id") or "",
+                "guild_id": guild_id,
                 "client_id": doc.get("client_id") or "",
                 "has_token": bool(doc.get("bot_token")),
                 "allowed_modules": {
                     mod["key"]: allowed.get(mod["key"], True) for mod in LICENSABLE_MODULES
                 },
                 "blocked": blocked_by_discord_id.get(doc.get("discord_user_id"), False),
+                "notify_channels": notify_channels,
             }
         )
 
@@ -3301,6 +3317,50 @@ def admin_update_bot_name(bot_id):
             flash("Nombre del bot actualizado correctamente.", "success")
     except Exception as e:
         flash(f"Error al guardar en MongoDB: {e}", "error")
+
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/bots/<bot_id>/notify", methods=["POST"])
+@requires_admin
+def admin_notify_bot_connected(bot_id):
+    """
+    Envía un embed verde de "bot conectado con el dashboard" al canal que
+    elija el admin, usando el bot_token PROPIO de ese cliente -- nunca el
+    del admin, porque el admin no tiene acceso directo al servidor del
+    cliente, solo a su configuración en Mongo. Es un simple POST vía la API
+    REST de Discord (mismo patrón que send_discord_log_embed): confirma que
+    el bot_token guardado es válido y tiene permiso para escribir en ese
+    canal, no que el proceso del bot (discord.py) esté conectado en este
+    instante -- eso son cosas independientes en Discord.
+    """
+    if not mongo_ready():
+        flash("La conexión a MongoDB no está disponible en este momento.", "error")
+        return redirect(url_for("admin_panel"))
+
+    channel_id = request.form.get("channel_id", "").strip()
+    if not channel_id:
+        flash("Selecciona un canal antes de enviar el aviso.", "error")
+        return redirect(url_for("admin_panel"))
+
+    doc = config_collection.find_one({"_id": bot_id})
+    if not doc:
+        flash("Ese bot no existe.", "error")
+        return redirect(url_for("admin_panel"))
+
+    bot_token = decrypt_secret(doc.get("bot_token")) or DISCORD_BOT_TOKEN
+    embed = {
+        "title": "✅ Bot conectado con el dashboard",
+        "description": "Este mensaje confirma que el bot puede recibir y aplicar la configuración del panel de administración.",
+        "color": 0x23A55A,  # verde
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        send_discord_log_embed(bot_token, channel_id, embed)
+        flash(f"Aviso de conexión enviado al canal seleccionado ({doc.get('bot_name') or bot_id}).", "success")
+    except requests.RequestException as e:
+        flash(f"No se pudo enviar el aviso a Discord: {e}", "error")
 
     return redirect(url_for("admin_panel"))
 
