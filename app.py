@@ -87,6 +87,7 @@ client = None
 db = None
 config_collection = None
 users_collection = None
+settings_collection = None
 mongo_init_error = None
 
 try:
@@ -104,6 +105,11 @@ try:
     # Colección multi-tenant: mapea el ID de Discord de cada cliente al bot_id
     # que tiene contratado, ej. {"_id": "<discord_user_id>", "bot_id": "<bot_id>"}.
     users_collection = db["users"]
+    # Colección GLOBAL (no multi-tenant, no por bot_id) de ajustes exclusivos
+    # del propio administrador del SaaS -- ej. las plantillas de embed de los
+    # logs de sanciones de Twitch (documento _id="twitch_embed_templates").
+    # Los clientes nunca leen ni escriben aquí directamente.
+    settings_collection = db["settings"]
     # El webhook de EventSub de Twitch (/webhooks/twitch/eventsub) recibe
     # eventos sin sesión Flask y necesita encontrar, por cada notificación,
     # qué bot/cliente es dueño de ese canal de Twitch -- este índice hace
@@ -2223,31 +2229,147 @@ def send_discord_log_embed(bot_token, channel_id, embed):
 
 # Colores de cada tipo de sanción (enteros RGB, formato que espera la API de
 # Discord para "color" dentro de un embed).
-TWITCH_SANCTION_COLORS = {
-    "ban": 0xED4245,             # rojo
-    "timeout": 0xF5A623,         # naranja
-    "warning": 0xFAA61A,         # ámbar
-    "delete_message": 0x5865F2,  # azul discord
+# ------------------------------------------------------------------
+# Plantillas de embed de los logs de sanciones de Twitch -- EXCLUSIVAS del
+# administrador del SaaS (ADMIN_DISCORD_ID). Se guardan en un único
+# documento GLOBAL (settings_collection, _id=TWITCH_EMBED_TEMPLATES_ID), NO
+# por bot_id: es el mismo aspecto visual para todos los clientes, y ningún
+# cliente puede editarlo desde su propio dashboard (solo /admin/*, detrás de
+# @requires_admin). Los clientes solo eligen canal y filtros (on/off); el
+# admin controla título, descripción, color y footer de cada tipo de aviso.
+# ------------------------------------------------------------------
+TWITCH_EMBED_TEMPLATES_ID = "twitch_embed_templates"
+
+TWITCH_EMBED_LABELS = {
+    "ban": "🔨 Baneo permanente",
+    "timeout": "⏱️ Timeout",
+    "warning": "⚠️ Advertencia",
+    "delete_message": "🗑️ Mensaje borrado",
 }
 
-TWITCH_SANCTION_TITLES = {
-    "ban": "🔨 Baneo permanente en Twitch",
-    "timeout": "⏱️ Timeout en Twitch",
-    "warning": "⚠️ Advertencia en Twitch",
-    "delete_message": "🗑️ Mensaje borrado en Twitch",
+DEFAULT_TWITCH_EMBED_TEMPLATES = {
+    "ban": {
+        "title": "🔨 Baneo permanente en Twitch",
+        "description": "**{usuario}** ha sido baneado permanentemente por **{moderador}**.\n\n**Motivo:** {motivo}",
+        "color": "ED4245",
+        "footer": "Twitch · {canal}",
+    },
+    "timeout": {
+        "title": "⏱️ Timeout en Twitch",
+        "description": "**{usuario}** ha sido silenciado temporalmente por **{moderador}**.\n\n**Motivo:** {motivo}\n**Finaliza:** {finaliza}",
+        "color": "F5A623",
+        "footer": "Twitch · {canal}",
+    },
+    "warning": {
+        "title": "⚠️ Advertencia en Twitch",
+        "description": "**{usuario}** ha recibido una advertencia de **{moderador}**.\n\n**Motivo:** {motivo}\n**Reglas citadas:** {reglas}",
+        "color": "FAA61A",
+        "footer": "Twitch · {canal}",
+    },
+    "delete_message": {
+        "title": "🗑️ Mensaje borrado en Twitch",
+        "description": "Se ha borrado un mensaje de **{usuario}** en el chat.\n\n**ID del mensaje:** `{mensaje_id}`\n\n*Twitch no incluye el moderador ni el contenido del mensaje borrado en este evento.*",
+        "color": "5865F2",
+        "footer": "Twitch · {canal}",
+    },
 }
+
+# Variables insertables por tipo, para el panel de "variables disponibles"
+# del editor de embeds del admin (mismo patrón que vars_panel en twitch.html
+# / tickets.html).
+TWITCH_EMBED_VARIABLES = {
+    "ban": [
+        {"token": "{usuario}", "label": "Usuario baneado"},
+        {"token": "{moderador}", "label": "Moderador"},
+        {"token": "{motivo}", "label": "Motivo"},
+        {"token": "{fecha}", "label": "Fecha del baneo"},
+        {"token": "{canal}", "label": "Canal de Twitch"},
+    ],
+    "timeout": [
+        {"token": "{usuario}", "label": "Usuario"},
+        {"token": "{moderador}", "label": "Moderador"},
+        {"token": "{motivo}", "label": "Motivo"},
+        {"token": "{finaliza}", "label": "Fecha en que termina"},
+        {"token": "{fecha}", "label": "Fecha del timeout"},
+        {"token": "{canal}", "label": "Canal de Twitch"},
+    ],
+    "warning": [
+        {"token": "{usuario}", "label": "Usuario"},
+        {"token": "{moderador}", "label": "Moderador"},
+        {"token": "{motivo}", "label": "Motivo"},
+        {"token": "{reglas}", "label": "Reglas de chat citadas"},
+        {"token": "{fecha}", "label": "Fecha"},
+        {"token": "{canal}", "label": "Canal de Twitch"},
+    ],
+    "delete_message": [
+        {"token": "{usuario}", "label": "Usuario del mensaje borrado"},
+        {"token": "{mensaje_id}", "label": "ID del mensaje"},
+        {"token": "{fecha}", "label": "Fecha"},
+        {"token": "{canal}", "label": "Canal de Twitch"},
+    ],
+}
+
+
+def get_twitch_embed_templates():
+    """
+    Plantillas actuales (guardadas por el admin, con fallback a los
+    defaults campo a campo si todavía no se han guardado o falta alguno).
+    Nunca lanza si Mongo no está disponible -- devuelve los defaults.
+    """
+    templates = {key: dict(value) for key, value in DEFAULT_TWITCH_EMBED_TEMPLATES.items()}
+    if settings_collection is None:
+        return templates
+    try:
+        doc = settings_collection.find_one({"_id": TWITCH_EMBED_TEMPLATES_ID}) or {}
+    except PyMongoError:
+        return templates
+    for key in templates:
+        stored = doc.get(key)
+        if isinstance(stored, dict):
+            templates[key].update({k: v for k, v in stored.items() if k in ("title", "description", "color", "footer")})
+    return templates
+
+
+def _render_twitch_embed_template(template, variables):
+    """Sustituye cada {token} de `variables` en title/description/footer de
+    la plantilla, y convierte el color hex guardado (ej. "ED4245") a el
+    entero que espera la API de Discord."""
+
+    def _fill(text):
+        text = text or ""
+        for token, value in variables.items():
+            text = text.replace(token, str(value) if value else "")
+        return text.strip()
+
+    color_hex = (template.get("color") or "5865F2").strip().lstrip("#") or "5865F2"
+    try:
+        color = int(color_hex, 16)
+    except ValueError:
+        color = 0x5865F2
+
+    embed = {"color": color}
+    title = _fill(template.get("title"))
+    description = _fill(template.get("description"))
+    footer_text = _fill(template.get("footer"))
+    if title:
+        embed["title"] = title
+    if description:
+        embed["description"] = description
+    if footer_text:
+        embed["footer"] = {"text": footer_text}
+    return embed
 
 
 def _twitch_moderation_embed(sub_type, event, broadcaster_display_name=""):
     """
-    Construye el embed de Discord a partir del tipo de suscripción EventSub
-    y su payload completo, mostrando TODOS los campos que Twitch envía para
-    ese tipo de evento (no solo usuario/motivo). Devuelve (filter_key,
-    embed) -- filter_key es la clave de config.twitch.filters que hay que
-    comprobar antes de enviar nada ("ban" / "timeout" / "warning" /
-    "delete_message"). Devuelve (None, None) si el tipo no se reconoce.
+    Construye el embed de Discord a partir del tipo de suscripción EventSub,
+    su payload completo, y la plantilla que haya definido el ADMIN para ese
+    tipo de sanción (get_twitch_embed_templates()) -- el cliente nunca
+    controla el aspecto del embed, solo el canal de destino y qué tipos
+    quiere recibir. Devuelve (filter_key, embed); (None, None) si el tipo de
+    evento no se reconoce.
 
-    Campos disponibles por tipo (documentación oficial de Twitch,
+    Variables disponibles por tipo (documentación oficial de Twitch,
     eventsub-subscription-types):
       - channel.ban: user_id/login/name, moderator_user_id/login/name,
         reason, banned_at, ends_at, is_permanent.
@@ -2260,61 +2382,51 @@ def _twitch_moderation_embed(sub_type, event, broadcaster_display_name=""):
     """
     user = event.get("user_name") or event.get("user_login") or "Desconocido"
     moderator = event.get("moderator_user_name") or event.get("moderator_user_login") or "Desconocido"
+    canal = (
+        broadcaster_display_name
+        or event.get("broadcaster_user_name")
+        or event.get("broadcaster_user_login")
+        or "Desconocido"
+    )
 
     if sub_type == "channel.ban":
         is_permanent = bool(event.get("is_permanent"))
         filter_key = "ban" if is_permanent else "timeout"
-        fields = [
-            {"name": "Usuario", "value": user, "inline": True},
-            {"name": "Moderador", "value": moderator, "inline": True},
-            {"name": "Tipo", "value": "Permanente" if is_permanent else "Temporal", "inline": True},
-            {"name": "Motivo", "value": event.get("reason") or "Sin motivo especificado", "inline": False},
-        ]
-        if not is_permanent and event.get("ends_at"):
-            fields.append({"name": "Finaliza", "value": event["ends_at"], "inline": True})
-        if event.get("banned_at"):
-            fields.append({"name": "Fecha", "value": event["banned_at"], "inline": True})
-        embed = {
-            "title": TWITCH_SANCTION_TITLES[filter_key],
-            "color": TWITCH_SANCTION_COLORS[filter_key],
-            "fields": fields,
+        variables = {
+            "{usuario}": user,
+            "{moderador}": moderator,
+            "{motivo}": event.get("reason") or "Sin motivo especificado",
+            "{finaliza}": event.get("ends_at") or "No aplica",
+            "{fecha}": event.get("banned_at") or "",
+            "{canal}": canal,
         }
-        return filter_key, embed
-
-    if sub_type == "channel.warning.send":
+    elif sub_type == "channel.warning.send":
+        filter_key = "warning"
         rules = event.get("chat_rules_cited") or []
-        fields = [
-            {"name": "Usuario", "value": user, "inline": True},
-            {"name": "Moderador", "value": moderator, "inline": True},
-            {"name": "Motivo", "value": event.get("reason") or "Sin motivo especificado", "inline": False},
-            {"name": "Reglas citadas", "value": ", ".join(rules) if rules else "Ninguna especificada", "inline": False},
-        ]
-        embed = {
-            "title": TWITCH_SANCTION_TITLES["warning"],
-            "color": TWITCH_SANCTION_COLORS["warning"],
-            "fields": fields,
+        variables = {
+            "{usuario}": user,
+            "{moderador}": moderator,
+            "{motivo}": event.get("reason") or "Sin motivo especificado",
+            "{reglas}": ", ".join(rules) if rules else "Ninguna especificada",
+            "{fecha}": "",
+            "{canal}": canal,
         }
-        return "warning", embed
-
-    if sub_type == "channel.chat.message_delete":
+    elif sub_type == "channel.chat.message_delete":
+        filter_key = "delete_message"
         target = event.get("target_user_name") or event.get("target_user_login") or "Desconocido"
-        fields = [
-            {"name": "Usuario", "value": target, "inline": True},
-            {"name": "ID del mensaje", "value": f"`{event.get('message_id', 'desconocido')}`", "inline": True},
-            {
-                "name": "Nota",
-                "value": "Twitch no incluye el moderador ni el contenido del mensaje borrado en este evento.",
-                "inline": False,
-            },
-        ]
-        embed = {
-            "title": TWITCH_SANCTION_TITLES["delete_message"],
-            "color": TWITCH_SANCTION_COLORS["delete_message"],
-            "fields": fields,
+        variables = {
+            "{usuario}": target,
+            "{mensaje_id}": event.get("message_id", "desconocido"),
+            "{fecha}": "",
+            "{canal}": canal,
         }
-        return "delete_message", embed
+    else:
+        return None, None
 
-    return None, None
+    templates = get_twitch_embed_templates()
+    template = templates.get(filter_key, DEFAULT_TWITCH_EMBED_TEMPLATES[filter_key])
+    embed = _render_twitch_embed_template(template, variables)
+    return filter_key, embed
 
 
 def handle_twitch_eventsub_notification(sub_type, event):
@@ -2355,8 +2467,9 @@ def handle_twitch_eventsub_notification(sub_type, event):
     if not log_channel_id:
         return  # No ha elegido todavía un canal de Discord para los logs.
 
-    broadcaster_label = twitch_cfg.get("broadcaster_display_name") or twitch_cfg.get("broadcaster_id", "")
-    embed["footer"] = {"text": f"Twitch · {broadcaster_label}" if broadcaster_label else "Twitch EventSub Logs"}
+    # El título/descripción/color/footer ya vienen resueltos desde la
+    # plantilla del admin (_twitch_moderation_embed); aquí solo se añade la
+    # marca de tiempo real del evento.
     embed["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     bot_token = active_bot_token(config)
@@ -3320,6 +3433,55 @@ def admin_stop_simulation():
     session.pop("is_simulating", None)
     session.pop("guild_id", None)
     return redirect(url_for("admin_panel"))
+
+
+# ------------------------------------------------------------------
+# Editor de plantillas de embed de los logs de sanciones de Twitch --
+# EXCLUSIVO del admin del SaaS. Un cliente jamás puede llegar aquí: ambas
+# rutas están detrás de @requires_admin, no de @requires_module, y el
+# documento que leen/escriben (settings_collection) es global, no cuelga de
+# ningún bot_id ni aparece en ninguna vista de cliente.
+# ------------------------------------------------------------------
+@app.route("/admin/twitch-embeds")
+@requires_admin
+def admin_twitch_embeds():
+    templates = get_twitch_embed_templates()
+    return render_template(
+        "admin_twitch_embeds.html",
+        templates=templates,
+        variables=TWITCH_EMBED_VARIABLES,
+        labels=TWITCH_EMBED_LABELS,
+        defaults=DEFAULT_TWITCH_EMBED_TEMPLATES,
+        user=current_user(),
+    )
+
+
+@app.route("/admin/twitch-embeds/save", methods=["POST"])
+@requires_admin
+def save_admin_twitch_embeds():
+    if settings_collection is None:
+        flash("MongoDB no disponible: no se pudo guardar.", "error")
+        return redirect(url_for("admin_twitch_embeds"))
+
+    form = request.form
+    update = {}
+    for key, default_tpl in DEFAULT_TWITCH_EMBED_TEMPLATES.items():
+        update[key] = {
+            "title": form.get(f"{key}_title", "").strip(),
+            "description": form.get(f"{key}_description", "").strip(),
+            "color": form.get(f"{key}_color", "").strip().lstrip("#") or default_tpl["color"],
+            "footer": form.get(f"{key}_footer", "").strip(),
+        }
+
+    try:
+        settings_collection.update_one(
+            {"_id": TWITCH_EMBED_TEMPLATES_ID}, {"$set": update}, upsert=True
+        )
+        flash("Plantillas de embeds de Twitch guardadas correctamente.", "success")
+    except PyMongoError as e:
+        flash(f"Error al guardar en MongoDB: {e}", "error")
+
+    return redirect(url_for("admin_twitch_embeds"))
 
 
 # Vercel usa esta variable "app" como punto de entrada WSGI (nunca ejecuta
