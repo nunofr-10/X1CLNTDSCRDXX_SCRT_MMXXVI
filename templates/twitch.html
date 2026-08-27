@@ -289,33 +289,6 @@
                     class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm resize-y focus:outline-none focus:border-accent">{{ config.twitch.live.mensaje }}</textarea>
         </div>
 
-        <div class="border-t border-border pt-5">
-          <h3 class="text-sm font-bold text-white mb-1">🔑 Credenciales de tu app de Twitch</h3>
-          <p class="text-xs text-muted mb-4">
-            Crea una app gratuita en la
-            <a href="https://dev.twitch.tv/console/apps" target="_blank" class="text-accent hover:underline">Twitch Developer Console</a>
-            y pega aquí su Client ID y Client Secret. Son tuyos y de nadie más: se guardan aislados de otros
-            clientes, y el Client Secret se guarda siempre cifrado.
-          </p>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-bold uppercase text-muted mb-2">Client ID</label>
-              <input type="text" name="twitch_client_id" value="{{ config.twitch.credentials.client_id }}"
-                     placeholder="Client ID de tu app de Twitch"
-                     class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:border-accent">
-            </div>
-            <div>
-              <label class="block text-xs font-bold uppercase text-muted mb-2">Client Secret</label>
-              <input type="password" name="twitch_client_secret" value=""
-                     placeholder="{% if config.twitch.credentials.client_secret %}•••••••••••• (ya configurado -- escribe para reemplazarlo){% else %}Client Secret de tu app de Twitch{% endif %}"
-                     autocomplete="new-password"
-                     class="w-full bg-panel border border-border rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:border-accent">
-              <p class="text-xs text-muted mt-2">Déjalo en blanco para conservar el que ya tienes guardado.</p>
-            </div>
-          </div>
-        </div>
-
       </form>
     </section>
 
