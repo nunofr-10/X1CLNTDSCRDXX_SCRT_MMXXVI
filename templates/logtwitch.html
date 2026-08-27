@@ -304,6 +304,10 @@
            class="inline-flex items-center gap-2 bg-accent hover:bg-accent/90 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
           🎮 Vincular mi cuenta de Twitch
         </a>
+        <p class="text-xs text-muted mt-3">
+          Tras autorizar en Twitch, aquí abajo aparecerá un desplegable para elegir entre tu
+          propio canal y los canales donde tu cuenta sea moderadora.
+        </p>
       {% endif %}
 
       {% if config.twitch.available_channels %}
@@ -327,6 +331,14 @@
               Guardar canal
             </button>
           </form>
+        </div>
+      {% elif config.twitch.broadcaster_id %}
+        <div class="border-t border-border pt-5 mt-5">
+          <p class="text-xs text-amber-400">
+            ⚠️ Tu cuenta se vinculó antes de que existiera el selector de canal. Pulsa
+            "Volver a vincular / renovar permisos" arriba para que aparezca el desplegable
+            con tu canal y los que moderas.
+          </p>
         </div>
       {% endif %}
     </section>
