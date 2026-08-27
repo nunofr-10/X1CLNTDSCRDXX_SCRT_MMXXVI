@@ -351,8 +351,10 @@ TWITCH_HELIX_API = "https://api.twitch.tv/helix"
 TWITCH_OAUTH_SCOPES = [
     "channel:moderate",              # channel.ban (bans y timeouts)
     "moderator:manage:warnings",     # channel.warning.send (advertencias)
-    "user:read:chat",                # channel.chat.message_delete (borrados)
-    "channel:bot",                   # channel.chat.message_delete (lado broadcaster)
+    "user:read:chat",                # channel.chat.message_delete (borrados) -- lado "chatting user"
+    "user:bot",                      # channel.chat.message_delete -- exigido además de user:read:chat
+                                      # cuando la suscripción se crea con un App Access Token (nuestro caso)
+    "channel:bot",                   # channel.chat.message_delete -- lado broadcaster (alternativa a ser moderador)
     "user:read:moderated_channels",  # listar los canales que el usuario modera (selector de canal)
 ]
 
