@@ -222,7 +222,7 @@
   </div>
 {% endmacro %}
 
-{% macro youtube_section(prefix, cfg, title_icon, title_text, help_text) %}
+{% macro youtube_section(prefix, cfg, title_icon, title_text, help_text, show_type_toggles=false) %}
   <label class="flex items-center justify-between border border-border rounded-lg px-4 py-3 cursor-pointer">
     <div>
       <p class="text-sm font-semibold text-white">Habilitar notificaciones de {{ title_text|lower }}</p>
@@ -230,6 +230,26 @@
     </div>
     <input type="checkbox" name="{{ prefix }}_enabled" class="switch" {% if cfg.enabled %}checked{% endif %}>
   </label>
+
+  {% if show_type_toggles %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <label class="flex items-center justify-between border border-border rounded-lg px-4 py-3 cursor-pointer">
+      <div>
+        <p class="text-sm font-semibold text-white">🎬 Vídeos normales</p>
+        <p class="text-xs text-muted">Avisa cuando subas un vídeo que NO sea Short.</p>
+      </div>
+      <input type="checkbox" name="{{ prefix }}_notify_videos" class="switch" {% if cfg.notify_videos %}checked{% endif %}>
+    </label>
+    <label class="flex items-center justify-between border border-border rounded-lg px-4 py-3 cursor-pointer">
+      <div>
+        <p class="text-sm font-semibold text-white">📱 Shorts</p>
+        <p class="text-xs text-muted">Avisa cuando subas un Short.</p>
+      </div>
+      <input type="checkbox" name="{{ prefix }}_notify_shorts" class="switch" {% if cfg.notify_shorts %}checked{% endif %}>
+    </label>
+  </div>
+  <p class="text-xs text-muted -mt-2">El bot detecta automáticamente si cada subida nueva es un vídeo normal o un Short antes de avisar.</p>
+  {% endif %}
 
   <div>
     <label class="block text-xs font-bold uppercase text-muted mb-2">Canal de YouTube (URL, @handle o ID)</label>
@@ -321,7 +341,7 @@
         <!-- 1. Notificaciones de vídeos subidos -->
         <!-- ============================================================ -->
         <div id="tab-videos" class="section-tab-panel space-y-5">
-          {{ youtube_section("videos", config.youtube.videos, "🎬", "Vídeos", "Avisa en Discord cada vez que subes un vídeo nuevo al canal.") }}
+          {{ youtube_section("videos", config.youtube.videos, "🎬", "Vídeos", "Avisa en Discord cada vez que subes un vídeo nuevo al canal.", show_type_toggles=true) }}
         </div>
 
         <!-- ============================================================ -->
