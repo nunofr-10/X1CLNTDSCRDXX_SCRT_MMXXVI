@@ -431,6 +431,12 @@ DEFAULT_YOUTUBE_VIDEOS = {
     "discord_channel_id": "",
     "ping_role_id": "",
     "mensaje": "🎬 ¡Nuevo vídeo! {title} - {url}",
+    # Dentro de "enabled" (el interruptor general de la sección) se puede
+    # además elegir por separado si avisar de vídeos normales y/o de
+    # Shorts -- el bot detecta el tipo de cada subida nueva y filtra según
+    # estos dos toggles antes de enviar el aviso a Discord.
+    "notify_videos": True,
+    "notify_shorts": True,
 }
 
 DEFAULT_YOUTUBE_STREAMS = {
@@ -2009,6 +2015,8 @@ def save_youtube():
         "discord_channel_id": form.get("videos_discord_channel_id", "").strip(),
         "ping_role_id": form.get("videos_ping_role_id", "").strip(),
         "mensaje": form.get("videos_mensaje", "").strip(),
+        "notify_videos": "videos_notify_videos" in form,
+        "notify_shorts": "videos_notify_shorts" in form,
     }
 
     streams = {
