@@ -1097,6 +1097,15 @@ def discord_get(endpoint, token=None, use_bot=False, bot_token=None):
         headers["Authorization"] = f"Bearer {token}"
 
     resp = requests.get(f"{DISCORD_API}{endpoint}", headers=headers, timeout=10)
+    if not resp.ok:
+        # Diagnóstico temporal: fetch_guild_channels/fetch_guild_roles tragan
+        # cualquier excepción en silencio (para no tumbar la vista con un
+        # 500), así que sin este print no queda ningún rastro en los logs
+        # de Vercel de POR QUÉ falló la llamada a Discord (401 token
+        # inválido, 403 sin permisos, 429 rate limit, etc.).
+        print(
+            f"[discord_get] {resp.status_code} en {endpoint}: {resp.text[:300]}"
+        )
     resp.raise_for_status()
     return resp.json()
 
