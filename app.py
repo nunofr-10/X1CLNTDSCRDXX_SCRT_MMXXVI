@@ -1098,6 +1098,17 @@ def discord_get(endpoint, token=None, use_bot=False, bot_token=None):
 
     resp = requests.get(f"{DISCORD_API}{endpoint}", headers=headers, timeout=10)
     if not resp.ok:
+        # Diagnóstico: los tokens cifrados con Fernet (encrypt_secret) SIEMPRE
+        # empiezan por "gAAAAA" en texto -- si el token que se está usando
+        # aquí empieza así, significa que decrypt_secret() falló (p.ej.
+        # ENCRYPTION_KEY no coincide con la que se usó para cifrarlo) y se
+        # está mandando el texto cifrado tal cual a Discord como si fuera el
+        # token real, lo cual siempre da 401.
+        used_token = bot_token or DISCORD_BOT_TOKEN or ""
+        print(
+            f"[discord_get] token usado empieza por: {used_token[:12]!r} "
+            f"(longitud {len(used_token)})"
+        )
         # Diagnóstico temporal: fetch_guild_channels/fetch_guild_roles tragan
         # cualquier excepción en silencio (para no tumbar la vista con un
         # 500), así que sin este print no queda ningún rastro en los logs
