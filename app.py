@@ -3376,6 +3376,45 @@ def admin_update_license(bot_id):
     return redirect(url_for("admin_panel"))
 
 
+@app.route("/admin/bots/<bot_id>/token", methods=["POST"])
+@requires_admin
+def admin_update_bot_token(bot_id):
+    """
+    Permite reemplazar el bot_token guardado de un cliente ya creado, sin
+    tener que borrar y recrear su ficha. Útil cuando el token original se
+    invalida (regenerado o revocado por Discord, por ejemplo tras haber
+    quedado expuesto) y hay que poner el token nuevo generado en el
+    Developer Portal de Discord para ESE bot en concreto.
+
+    IMPORTANTE: el token que se ponga aquí tiene que ser el del bot que
+    esté invitado a los servidores de ESTE cliente -- un bot de Discord
+    solo puede leer canales/roles de los servidores donde él mismo está
+    invitado, así que no sirve pegar el token de otro bot (por ejemplo el
+    del admin) esperando que funcione para un cliente distinto.
+    """
+    if not mongo_ready():
+        flash("La conexión a MongoDB no está disponible en este momento.", "error")
+        return redirect(url_for("admin_panel"))
+
+    new_token = request.form.get("bot_token", "").strip()
+    if not new_token:
+        flash("Indica el nuevo token del bot.", "error")
+        return redirect(url_for("admin_panel"))
+
+    try:
+        result = config_collection.update_one(
+            {"_id": bot_id}, {"$set": {"bot_token": encrypt_secret(new_token)}}
+        )
+        if result.matched_count == 0:
+            flash("Ese bot no existe.", "error")
+        else:
+            flash("Token del bot actualizado correctamente.", "success")
+    except Exception as e:
+        flash(f"Error al guardar en MongoDB: {e}", "error")
+
+    return redirect(url_for("admin_panel"))
+
+
 @app.route("/admin/bots/<bot_id>/rename", methods=["POST"])
 @requires_admin
 def admin_update_bot_name(bot_id):
